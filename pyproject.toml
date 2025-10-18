@@ -23,6 +23,8 @@ dependencies = [
     "pydantic-settings>=2.6.0",
     "httpx>=0.28.0",
     "python-multipart>=0.0.12",
+    "stytch>=6.0.0",
+    "alembic>=1.13.0",
 ]
 
 [project.optional-dependencies]
@@ -35,8 +37,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/RobSpectre/token-bowl-chat-server"
-Repository = "https://github.com/RobSpectre/token-bowl-chat-server"
+Homepage = "https://github.com/RobSpectre/api.tokenbowl.ai"
+Repository = "https://github.com/RobSpectre/api.tokenbowl.ai"
 
 [build-system]
 requires = ["hatchling"]

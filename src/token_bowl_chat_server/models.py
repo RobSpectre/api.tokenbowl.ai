@@ -36,9 +36,12 @@ class User(BaseModel):
 
     username: str = Field(..., min_length=1, max_length=50)
     api_key: str = Field(..., min_length=32, max_length=128)
+    stytch_user_id: Optional[str] = None
+    email: Optional[str] = None
     webhook_url: Optional[HttpUrl] = None
     logo: Optional[str] = None
     viewer: bool = False
+    admin: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @field_validator("logo")
@@ -77,6 +80,7 @@ class UserRegistration(BaseModel):
     webhook_url: Optional[HttpUrl] = None
     logo: Optional[str] = None
     viewer: bool = False
+    admin: bool = False
 
     @field_validator("logo")
     @classmethod
@@ -95,6 +99,7 @@ class UserRegistrationResponse(BaseModel):
     webhook_url: Optional[HttpUrl] = None
     logo: Optional[str] = None
     viewer: bool = False
+    admin: bool = False
 
 
 class MessageResponse(BaseModel):
@@ -148,3 +153,80 @@ class UpdateLogoRequest(BaseModel):
         if v is not None and v not in AVAILABLE_LOGOS:
             raise ValueError(f"Logo must be one of: {', '.join(AVAILABLE_LOGOS)}")
         return v
+
+
+class UpdateWebhookRequest(BaseModel):
+    """Request model for updating user webhook URL."""
+
+    webhook_url: Optional[HttpUrl] = None
+
+
+class StytchLoginRequest(BaseModel):
+    """Request model for Stytch magic link login/signup."""
+
+    email: str = Field(..., min_length=3, max_length=255)
+    username: Optional[str] = Field(None, min_length=1, max_length=50)
+
+
+class StytchLoginResponse(BaseModel):
+    """Response model for Stytch magic link send."""
+
+    message: str
+    email: str
+
+
+class StytchAuthenticateRequest(BaseModel):
+    """Request model for Stytch magic link authentication."""
+
+    token: str = Field(..., min_length=1)
+
+
+class StytchAuthenticateResponse(BaseModel):
+    """Response model for Stytch authentication."""
+
+    username: str
+    session_token: str
+    api_key: str
+
+
+class UserProfileResponse(BaseModel):
+    """Response model for user profile."""
+
+    username: str
+    email: Optional[str] = None
+    api_key: str
+    webhook_url: Optional[HttpUrl] = None
+    logo: Optional[str] = None
+    viewer: bool = False
+    admin: bool = False
+    created_at: str
+
+
+class UpdateUsernameRequest(BaseModel):
+    """Request model for updating username."""
+
+    username: str = Field(..., min_length=1, max_length=50)
+
+
+class AdminUpdateUserRequest(BaseModel):
+    """Admin request model for updating any user's profile."""
+
+    email: Optional[str] = None
+    webhook_url: Optional[HttpUrl] = None
+    logo: Optional[str] = None
+    viewer: Optional[bool] = None
+    admin: Optional[bool] = None
+
+    @field_validator("logo")
+    @classmethod
+    def validate_logo(cls, v: Optional[str]) -> Optional[str]:
+        """Validate that logo is one of the available options."""
+        if v is not None and v not in AVAILABLE_LOGOS:
+            raise ValueError(f"Logo must be one of: {', '.join(AVAILABLE_LOGOS)}")
+        return v
+
+
+class AdminMessageUpdate(BaseModel):
+    """Admin request model for updating message content."""
+
+    content: str = Field(..., min_length=1, max_length=10000)

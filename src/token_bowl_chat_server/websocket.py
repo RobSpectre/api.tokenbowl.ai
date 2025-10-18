@@ -118,26 +118,43 @@ connection_manager = ConnectionManager()
 async def websocket_auth(websocket: WebSocket) -> Optional[User]:
     """Authenticate a WebSocket connection.
 
+    Supports dual authentication:
+    - API key via query parameter: ?api_key=KEY
+    - API key via X-API-Key header
+    - Stytch session token via Authorization: Bearer <token> header
+
     Args:
         websocket: WebSocket connection
 
     Returns:
         Authenticated user or None if authentication fails
     """
-    # Try to get API key from query parameters
+    # Try API key authentication first (query param or header)
     api_key = websocket.query_params.get("api_key")
 
     if not api_key:
         # Try to get from headers
         api_key = websocket.headers.get("x-api-key")
 
-    if not api_key:
-        await websocket.close(code=1008, reason="Missing API key")
-        return None
+    if api_key:
+        user = validate_api_key(api_key)
+        if user:
+            return user
 
-    user = validate_api_key(api_key)
-    if not user:
-        await websocket.close(code=1008, reason="Invalid API key")
-        return None
+    # Try Stytch session token authentication
+    authorization = websocket.headers.get("authorization")
+    if authorization and authorization.startswith("Bearer "):
+        from .stytch_client import stytch_client
 
-    return user
+        session_token = authorization[7:]  # Remove "Bearer " prefix
+        stytch_user_id = await stytch_client.validate_session(session_token)
+
+        if stytch_user_id:
+            from .storage import storage
+            user = storage.get_user_by_stytch_id(stytch_user_id)
+            if user:
+                return user
+
+    # No valid authentication provided
+    await websocket.close(code=1008, reason="Invalid or missing authentication credentials")
+    return None

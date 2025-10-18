@@ -62,3 +62,14 @@ def registered_user2(client):
     )
     assert response.status_code == 201
     return response.json()
+
+
+@pytest.fixture
+def registered_admin(client):
+    """Register an admin user."""
+    response = client.post(
+        "/register",
+        json={"username": "admin_user", "webhook_url": None, "admin": True},
+    )
+    assert response.status_code == 201
+    return response.json()

@@ -64,6 +64,24 @@ python scripts/export_openapi.py
 # Or: make openapi
 ```
 
+### Database Migrations
+```bash
+# Create a new migration
+alembic revision -m "description_of_change"
+
+# Apply all pending migrations
+alembic upgrade head
+
+# Downgrade one migration
+alembic downgrade -1
+
+# View migration history
+alembic history
+
+# View current database version
+alembic current
+```
+
 ## Architecture
 
 ### Core Components
@@ -93,7 +111,7 @@ python scripts/export_openapi.py
 
 ### Database Schema
 
-**users table**: `username` (PK), `api_key` (unique), `webhook_url`, `created_at`
+**users table**: `username` (PK), `api_key` (unique), `stytch_user_id` (unique), `email`, `webhook_url`, `logo`, `viewer`, `admin`, `created_at`
 
 **messages table**: `id` (UUID), `from_username` (FK), `to_username` (nullable), `content`, `message_type`, `timestamp`
 
@@ -101,12 +119,32 @@ Indexes on: `timestamp`, `to_username`, `from_username` for efficient queries.
 
 **Message history limit**: Configurable (default 100). Old messages are automatically deleted when limit is exceeded.
 
+**Migrations**: Database schema is managed via Alembic. File-based databases automatically run migrations on startup. In-memory databases (tests) create schema directly for speed.
+
+### Authorization and Roles
+
+**auth.py** provides two authentication dependencies:
+- `get_current_user`: Validates API key or Stytch session token, returns authenticated user
+- `get_current_admin`: Validates user has admin privileges (raises HTTP 403 if not admin)
+
+**User roles**:
+- **Regular users**: Can send/receive messages, update their own profile
+- **Viewers** (`viewer=True`): Read-only users, not listed in user directory
+- **Admins** (`admin=True`): Full access to user management and message moderation
+
+**Admin endpoints** (protected by `get_current_admin` dependency):
+- User management: GET/PATCH/DELETE `/admin/users/{username}`, GET `/admin/users`
+- Message moderation: GET/PATCH/DELETE `/admin/messages/{message_id}`
+
+All admin endpoints return HTTP 403 Forbidden if the authenticated user is not an admin.
+
 ### Testing Patterns
 
 **conftest.py** provides test fixtures:
 - `test_storage`: Auto-used fixture that creates in-memory SQLite and patches global `storage` in all modules
 - `client`: TestClient for API testing
 - `registered_user`, `registered_user2`: Pre-registered test users with API keys
+- `registered_admin`: Pre-registered admin user for testing admin endpoints
 
 All tests use in-memory SQLite (`:memory:`), ensuring isolation and speed.
 
@@ -125,6 +163,7 @@ Environment variables (all optional):
 - `HOST`: Server host (default: 0.0.0.0)
 - `PORT`: Server port (default: 8000)
 - `LOG_LEVEL`: Logging level (default: info)
+- `RELOAD`: Auto-reload on code changes (default: true, set to false in production)
 - `WEBHOOK_TIMEOUT`: Webhook request timeout in seconds (default: 10.0)
 - `WEBHOOK_MAX_RETRIES`: Max webhook retry attempts (default: 3)
 - `MESSAGE_HISTORY_LIMIT`: Max messages to retain (default: 100)
@@ -139,8 +178,8 @@ Environment variables (all optional):
 
 ## Important Notes
 
-- **WebSocket authentication**: API key via query param `?api_key=KEY` or `X-API-Key` header
-- **REST authentication**: `X-API-Key` header (handled by FastAPI dependency in `get_current_user`)
+- **WebSocket authentication**: Dual auth support - API key via query param `?api_key=KEY` or `X-API-Key` header, OR Stytch session token via `Authorization: Bearer <token>` header
+- **REST authentication**: Dual auth support - API key via `X-API-Key` header OR Stytch session token via `Authorization: Bearer <token>` header (handled by FastAPI dependency in `get_current_user`)
 - **Message timestamps**: Always use UTC (`datetime.now(UTC)`)
 - **Pagination**: All message endpoints support `limit`, `offset`, and `since` parameters
 - **CORS**: Currently allows all origins (`allow_origins=["*"]`) - configure for production
@@ -156,10 +195,14 @@ Environment variables (all optional):
 4. Regenerate OpenAPI spec: `make openapi`
 
 ### Modifying Database Schema
-1. Update schema in `storage.py` `_init_db()` method
-2. Add migration logic if needed (no formal migration system exists)
-3. Update model classes in `models.py`
-4. Update tests to reflect schema changes
+1. Create a new Alembic migration: `alembic revision -m "description"`
+2. Edit the generated migration file in `alembic/versions/`
+3. Write SQL in `upgrade()` using `op.execute()` for schema changes
+4. Write SQL in `downgrade()` to reverse the changes
+5. Update `_init_db()` in `storage.py` for in-memory database schema (tests)
+6. Update model classes in `models.py` if needed
+7. Update tests to reflect schema changes
+8. Test migration: `alembic upgrade head`
 
 ### WebSocket Changes
 1. Modify `websocket.py` for connection management changes

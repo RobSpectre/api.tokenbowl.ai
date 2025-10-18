@@ -461,10 +461,9 @@ def test_register_user_with_invalid_logo(client):
     assert response.status_code == 422  # Validation error
 
 
-def test_get_available_logos(client, registered_user):
-    """Test getting list of available logos."""
-    headers = {"X-API-Key": registered_user["api_key"]}
-    response = client.get("/logos", headers=headers)
+def test_get_available_logos(client):
+    """Test getting list of available logos (public endpoint)."""
+    response = client.get("/logos")
     assert response.status_code == 200
     logos = response.json()
     assert isinstance(logos, list)
@@ -528,3 +527,437 @@ def test_update_logo_without_auth(client):
         json={"logo": "claude-color.png"},
     )
     assert response.status_code == 401
+
+
+def test_update_user_webhook(client, registered_user):
+    """Test updating a user's webhook URL."""
+    headers = {"X-API-Key": registered_user["api_key"]}
+    response = client.patch(
+        "/users/me/webhook",
+        json={"webhook_url": "https://example.com/new-webhook"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["message"] == "Webhook URL updated successfully"
+    assert data["webhook_url"] == "https://example.com/new-webhook"
+
+    # Verify via profile endpoint
+    profile = client.get("/users/me", headers=headers)
+    assert profile.json()["webhook_url"] == "https://example.com/new-webhook"
+
+
+def test_clear_user_webhook(client, registered_user):
+    """Test clearing a user's webhook URL."""
+    headers = {"X-API-Key": registered_user["api_key"]}
+
+    # First set a webhook
+    client.patch(
+        "/users/me/webhook",
+        json={"webhook_url": "https://example.com/webhook"},
+        headers=headers,
+    )
+
+    # Then clear it
+    response = client.patch(
+        "/users/me/webhook",
+        json={"webhook_url": None},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["message"] == "Webhook URL updated successfully"
+    assert data["webhook_url"] == ""
+
+    # Verify via profile endpoint
+    profile = client.get("/users/me", headers=headers)
+    assert profile.json()["webhook_url"] is None
+
+
+def test_update_webhook_with_invalid_url(client, registered_user):
+    """Test updating webhook with invalid URL."""
+    headers = {"X-API-Key": registered_user["api_key"]}
+    response = client.patch(
+        "/users/me/webhook",
+        json={"webhook_url": "not-a-valid-url"},
+        headers=headers,
+    )
+    assert response.status_code == 422  # Validation error
+
+
+def test_update_webhook_without_auth(client):
+    """Test updating webhook without authentication."""
+    response = client.patch(
+        "/users/me/webhook",
+        json={"webhook_url": "https://example.com/webhook"},
+    )
+    assert response.status_code == 401
+
+
+def test_get_my_profile(client, registered_user):
+    """Test getting current user's profile."""
+    headers = {"X-API-Key": registered_user["api_key"]}
+    response = client.get("/users/me", headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["username"] == "test_user"
+    assert data["api_key"] == registered_user["api_key"]
+    assert data["email"] is None  # No email for regular registration
+    assert "created_at" in data
+
+
+def test_get_my_profile_without_auth(client):
+    """Test getting profile without authentication."""
+    response = client.get("/users/me")
+    assert response.status_code == 401
+
+
+def test_update_my_username(client, registered_user):
+    """Test updating current user's username."""
+    headers = {"X-API-Key": registered_user["api_key"]}
+    response = client.patch(
+        "/users/me/username",
+        json={"username": "new_username"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["username"] == "new_username"
+    assert data["api_key"] == registered_user["api_key"]
+
+    # Verify old username no longer works
+    old_user = client.get("/users/me", headers=headers)
+    # Should still work because API key is the same
+    assert old_user.status_code == 200
+    assert old_user.json()["username"] == "new_username"
+
+
+def test_update_my_username_to_existing(client, registered_user, registered_user2):
+    """Test updating username to one that already exists."""
+    headers = {"X-API-Key": registered_user["api_key"]}
+    response = client.patch(
+        "/users/me/username",
+        json={"username": "test_user2"},  # Already exists
+        headers=headers,
+    )
+    assert response.status_code == 409
+    assert "already exists" in response.json()["detail"]
+
+
+def test_update_my_username_without_auth(client):
+    """Test updating username without authentication."""
+    response = client.patch(
+        "/users/me/username",
+        json={"username": "new_username"},
+    )
+    assert response.status_code == 401
+
+
+def test_regenerate_api_key(client, registered_user):
+    """Test regenerating API key."""
+    headers = {"X-API-Key": registered_user["api_key"]}
+    old_api_key = registered_user["api_key"]
+
+    response = client.post("/users/me/regenerate-api-key", headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["message"] == "API key regenerated successfully"
+    assert "api_key" in data
+    assert len(data["api_key"]) == 64  # 32 bytes hex = 64 chars
+    new_api_key = data["api_key"]
+
+    # Verify new API key is different from old one
+    assert new_api_key != old_api_key
+
+    # Verify old API key no longer works
+    old_headers = {"X-API-Key": old_api_key}
+    response = client.get("/users/me", headers=old_headers)
+    assert response.status_code == 401
+
+    # Verify new API key works
+    new_headers = {"X-API-Key": new_api_key}
+    response = client.get("/users/me", headers=new_headers)
+    assert response.status_code == 200
+    assert response.json()["username"] == "test_user"
+    assert response.json()["api_key"] == new_api_key
+
+
+def test_regenerate_api_key_without_auth(client):
+    """Test regenerating API key without authentication."""
+    response = client.post("/users/me/regenerate-api-key")
+    assert response.status_code == 401
+
+
+# Admin functionality tests
+
+
+def test_register_admin_user(client):
+    """Test registering a user with admin privileges."""
+    response = client.post(
+        "/register",
+        json={"username": "admin_test", "webhook_url": None, "admin": True},
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["username"] == "admin_test"
+    assert data["admin"] is True
+
+
+def test_admin_list_all_users(client, registered_user, registered_user2, registered_admin):
+    """Test admin listing all users."""
+    headers = {"X-API-Key": registered_admin["api_key"]}
+    response = client.get("/admin/users", headers=headers)
+    assert response.status_code == 200
+    users = response.json()
+    assert isinstance(users, list)
+    assert len(users) == 3  # test_user, test_user2, admin_user
+    usernames = [user["username"] for user in users]
+    assert "test_user" in usernames
+    assert "test_user2" in usernames
+    assert "admin_user" in usernames
+
+
+def test_admin_list_all_users_without_admin(client, registered_user):
+    """Test non-admin user cannot list all users."""
+    headers = {"X-API-Key": registered_user["api_key"]}
+    response = client.get("/admin/users", headers=headers)
+    assert response.status_code == 403
+    assert "Admin privileges required" in response.json()["detail"]
+
+
+def test_admin_get_user(client, registered_user, registered_admin):
+    """Test admin getting a specific user's profile."""
+    headers = {"X-API-Key": registered_admin["api_key"]}
+    response = client.get("/admin/users/test_user", headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["username"] == "test_user"
+    assert data["api_key"] == registered_user["api_key"]
+    assert "created_at" in data
+    assert data["admin"] is False
+
+
+def test_admin_get_user_not_found(client, registered_admin):
+    """Test admin getting a nonexistent user."""
+    headers = {"X-API-Key": registered_admin["api_key"]}
+    response = client.get("/admin/users/nonexistent_user", headers=headers)
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"]
+
+
+def test_admin_get_user_without_admin(client, registered_user):
+    """Test non-admin user cannot get user details."""
+    headers = {"X-API-Key": registered_user["api_key"]}
+    response = client.get("/admin/users/test_user", headers=headers)
+    assert response.status_code == 403
+
+
+def test_admin_update_user(client, registered_user, registered_admin):
+    """Test admin updating a user's profile."""
+    headers = {"X-API-Key": registered_admin["api_key"]}
+    response = client.patch(
+        "/admin/users/test_user",
+        json={
+            "email": "newemail@example.com",
+            "webhook_url": "https://example.com/webhook",
+            "logo": "claude-color.png",
+            "viewer": True,
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["username"] == "test_user"
+    assert data["email"] == "newemail@example.com"
+    assert data["webhook_url"] == "https://example.com/webhook"
+    assert data["logo"] == "claude-color.png"
+    assert data["viewer"] is True
+
+
+def test_admin_update_user_admin_status(client, registered_user, registered_admin):
+    """Test admin changing a user's admin status."""
+    headers = {"X-API-Key": registered_admin["api_key"]}
+    response = client.patch(
+        "/admin/users/test_user",
+        json={"admin": True},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["admin"] is True
+
+
+def test_admin_update_user_not_found(client, registered_admin):
+    """Test admin updating a nonexistent user."""
+    headers = {"X-API-Key": registered_admin["api_key"]}
+    response = client.patch(
+        "/admin/users/nonexistent_user",
+        json={"email": "test@example.com"},
+        headers=headers,
+    )
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"]
+
+
+def test_admin_update_user_without_admin(client, registered_user, registered_user2):
+    """Test non-admin user cannot update other users."""
+    headers = {"X-API-Key": registered_user["api_key"]}
+    response = client.patch(
+        "/admin/users/test_user2",
+        json={"email": "test@example.com"},
+        headers=headers,
+    )
+    assert response.status_code == 403
+
+
+def test_admin_delete_user(client, registered_user, registered_admin):
+    """Test admin deleting a user."""
+    headers = {"X-API-Key": registered_admin["api_key"]}
+    response = client.delete("/admin/users/test_user", headers=headers)
+    assert response.status_code == 204
+
+    # Verify user is deleted
+    response = client.get("/admin/users/test_user", headers=headers)
+    assert response.status_code == 404
+
+
+def test_admin_delete_user_not_found(client, registered_admin):
+    """Test admin deleting a nonexistent user."""
+    headers = {"X-API-Key": registered_admin["api_key"]}
+    response = client.delete("/admin/users/nonexistent_user", headers=headers)
+    assert response.status_code == 404
+
+
+def test_admin_delete_user_without_admin(client, registered_user, registered_user2):
+    """Test non-admin user cannot delete users."""
+    headers = {"X-API-Key": registered_user["api_key"]}
+    response = client.delete("/admin/users/test_user2", headers=headers)
+    assert response.status_code == 403
+
+
+def test_admin_get_message(client, registered_user, registered_admin):
+    """Test admin getting a message by ID."""
+    # First, send a message
+    headers = {"X-API-Key": registered_user["api_key"]}
+    msg_response = client.post(
+        "/messages",
+        json={"content": "Test message for admin"},
+        headers=headers,
+    )
+    assert msg_response.status_code == 201
+    message_id = msg_response.json()["id"]
+
+    # Now retrieve it as admin
+    admin_headers = {"X-API-Key": registered_admin["api_key"]}
+    response = client.get(f"/admin/messages/{message_id}", headers=admin_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == message_id
+    assert data["content"] == "Test message for admin"
+    assert data["from_username"] == "test_user"
+
+
+def test_admin_get_message_not_found(client, registered_admin):
+    """Test admin getting a nonexistent message."""
+    headers = {"X-API-Key": registered_admin["api_key"]}
+    fake_uuid = "00000000-0000-0000-0000-000000000000"
+    response = client.get(f"/admin/messages/{fake_uuid}", headers=headers)
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"]
+
+
+def test_admin_get_message_without_admin(client, registered_user):
+    """Test non-admin user cannot get messages by ID."""
+    headers = {"X-API-Key": registered_user["api_key"]}
+    fake_uuid = "00000000-0000-0000-0000-000000000000"
+    response = client.get(f"/admin/messages/{fake_uuid}", headers=headers)
+    assert response.status_code == 403
+
+
+def test_admin_update_message(client, registered_user, registered_admin):
+    """Test admin updating a message's content."""
+    # First, send a message
+    headers = {"X-API-Key": registered_user["api_key"]}
+    msg_response = client.post(
+        "/messages",
+        json={"content": "Original content"},
+        headers=headers,
+    )
+    assert msg_response.status_code == 201
+    message_id = msg_response.json()["id"]
+
+    # Update it as admin
+    admin_headers = {"X-API-Key": registered_admin["api_key"]}
+    response = client.patch(
+        f"/admin/messages/{message_id}",
+        json={"content": "Moderated content"},
+        headers=admin_headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == message_id
+    assert data["content"] == "Moderated content"
+    assert data["from_username"] == "test_user"
+
+
+def test_admin_update_message_not_found(client, registered_admin):
+    """Test admin updating a nonexistent message."""
+    headers = {"X-API-Key": registered_admin["api_key"]}
+    fake_uuid = "00000000-0000-0000-0000-000000000000"
+    response = client.patch(
+        f"/admin/messages/{fake_uuid}",
+        json={"content": "New content"},
+        headers=headers,
+    )
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"]
+
+
+def test_admin_update_message_without_admin(client, registered_user):
+    """Test non-admin user cannot update messages."""
+    headers = {"X-API-Key": registered_user["api_key"]}
+    fake_uuid = "00000000-0000-0000-0000-000000000000"
+    response = client.patch(
+        f"/admin/messages/{fake_uuid}",
+        json={"content": "New content"},
+        headers=headers,
+    )
+    assert response.status_code == 403
+
+
+def test_admin_delete_message(client, registered_user, registered_admin):
+    """Test admin deleting a message."""
+    # First, send a message
+    headers = {"X-API-Key": registered_user["api_key"]}
+    msg_response = client.post(
+        "/messages",
+        json={"content": "Message to be deleted"},
+        headers=headers,
+    )
+    assert msg_response.status_code == 201
+    message_id = msg_response.json()["id"]
+
+    # Delete it as admin
+    admin_headers = {"X-API-Key": registered_admin["api_key"]}
+    response = client.delete(f"/admin/messages/{message_id}", headers=admin_headers)
+    assert response.status_code == 204
+
+    # Verify it's deleted
+    response = client.get(f"/admin/messages/{message_id}", headers=admin_headers)
+    assert response.status_code == 404
+
+
+def test_admin_delete_message_not_found(client, registered_admin):
+    """Test admin deleting a nonexistent message."""
+    headers = {"X-API-Key": registered_admin["api_key"]}
+    fake_uuid = "00000000-0000-0000-0000-000000000000"
+    response = client.delete(f"/admin/messages/{fake_uuid}", headers=headers)
+    assert response.status_code == 404
+
+
+def test_admin_delete_message_without_admin(client, registered_user):
+    """Test non-admin user cannot delete messages."""
+    headers = {"X-API-Key": registered_user["api_key"]}
+    fake_uuid = "00000000-0000-0000-0000-000000000000"
+    response = client.delete(f"/admin/messages/{fake_uuid}", headers=headers)
+    assert response.status_code == 403

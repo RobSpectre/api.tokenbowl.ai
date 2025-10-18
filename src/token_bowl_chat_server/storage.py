@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Generator, Optional
 from uuid import UUID
 
+from alembic import command
+from alembic.config import Config
 from pydantic import HttpUrl
 
 from .models import Message, MessageType, User
@@ -35,50 +37,73 @@ class ChatStorage:
         self._init_db()
 
     def _init_db(self) -> None:
-        """Initialize database schema."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
+        """Initialize database schema using Alembic migrations."""
+        # Skip migrations for in-memory databases in tests
+        if self.db_path == ":memory:":
+            # For in-memory databases, create schema directly for speed
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
 
-            # Create users table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    username TEXT PRIMARY KEY,
-                    api_key TEXT UNIQUE NOT NULL,
-                    webhook_url TEXT,
-                    logo TEXT,
-                    viewer INTEGER NOT NULL DEFAULT 0,
-                    created_at TEXT NOT NULL
-                )
-            """)
+                # Create users table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS users (
+                        username TEXT PRIMARY KEY,
+                        api_key TEXT UNIQUE NOT NULL,
+                        stytch_user_id TEXT UNIQUE,
+                        email TEXT,
+                        webhook_url TEXT,
+                        logo TEXT,
+                        viewer INTEGER NOT NULL DEFAULT 0,
+                        admin INTEGER NOT NULL DEFAULT 0,
+                        created_at TEXT NOT NULL
+                    )
+                """)
 
-            # Create messages table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS messages (
-                    id TEXT PRIMARY KEY,
-                    from_username TEXT NOT NULL,
-                    to_username TEXT,
-                    content TEXT NOT NULL,
-                    message_type TEXT NOT NULL,
-                    timestamp TEXT NOT NULL,
-                    FOREIGN KEY (from_username) REFERENCES users(username)
-                )
-            """)
+                # Create messages table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS messages (
+                        id TEXT PRIMARY KEY,
+                        from_username TEXT NOT NULL,
+                        to_username TEXT,
+                        content TEXT NOT NULL,
+                        message_type TEXT NOT NULL,
+                        timestamp TEXT NOT NULL,
+                        FOREIGN KEY (from_username) REFERENCES users(username)
+                    )
+                """)
 
-            # Create indexes for better query performance
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_messages_timestamp
-                ON messages(timestamp)
-            """)
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_messages_to_username
-                ON messages(to_username)
-            """)
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_messages_from_username
-                ON messages(from_username)
-            """)
+                # Create indexes for better query performance
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_messages_timestamp
+                    ON messages(timestamp)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_messages_to_username
+                    ON messages(to_username)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_messages_from_username
+                    ON messages(from_username)
+                """)
 
-            conn.commit()
+                conn.commit()
+        else:
+            # For file-based databases, use Alembic migrations
+            self._run_migrations()
+
+    def _run_migrations(self) -> None:
+        """Run Alembic migrations to upgrade database to latest version."""
+        # Get the path to alembic.ini
+        alembic_ini_path = Path(__file__).parent.parent.parent / "alembic.ini"
+
+        # Create Alembic config
+        alembic_cfg = Config(str(alembic_ini_path))
+
+        # Override database URL to use the configured db_path
+        alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{self.db_path}")
+
+        # Run migrations to latest version
+        command.upgrade(alembic_cfg, "head")
 
     @contextmanager
     def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
@@ -125,15 +150,18 @@ class ChatStorage:
             # Insert user
             cursor.execute(
                 """
-                INSERT INTO users (username, api_key, webhook_url, logo, viewer, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO users (username, api_key, stytch_user_id, email, webhook_url, logo, viewer, admin, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user.username,
                     user.api_key,
+                    user.stytch_user_id,
+                    user.email,
                     str(user.webhook_url) if user.webhook_url else None,
                     user.logo,
                     1 if user.viewer else 0,
+                    1 if user.admin else 0,
                     user.created_at.isoformat(),
                 ),
             )
@@ -159,9 +187,12 @@ class ChatStorage:
             return User(
                 username=row["username"],
                 api_key=row["api_key"],
+                stytch_user_id=row["stytch_user_id"],
+                email=row["email"],
                 webhook_url=HttpUrl(row["webhook_url"]) if row["webhook_url"] else None,
                 logo=row["logo"],
                 viewer=bool(row["viewer"]),
+                admin=bool(row["admin"]),
                 created_at=datetime.fromisoformat(row["created_at"]),
             )
 
@@ -185,9 +216,41 @@ class ChatStorage:
             return User(
                 username=row["username"],
                 api_key=row["api_key"],
+                stytch_user_id=row["stytch_user_id"],
+                email=row["email"],
                 webhook_url=HttpUrl(row["webhook_url"]) if row["webhook_url"] else None,
                 logo=row["logo"],
                 viewer=bool(row["viewer"]),
+                admin=bool(row["admin"]),
+                created_at=datetime.fromisoformat(row["created_at"]),
+            )
+
+    def get_user_by_stytch_id(self, stytch_user_id: str) -> Optional[User]:
+        """Get user by Stytch user ID.
+
+        Args:
+            stytch_user_id: Stytch user ID to look up
+
+        Returns:
+            User if found, None otherwise
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM users WHERE stytch_user_id = ?", (stytch_user_id,))
+            row = cursor.fetchone()
+
+            if not row:
+                return None
+
+            return User(
+                username=row["username"],
+                api_key=row["api_key"],
+                stytch_user_id=row["stytch_user_id"],
+                email=row["email"],
+                webhook_url=HttpUrl(row["webhook_url"]) if row["webhook_url"] else None,
+                logo=row["logo"],
+                viewer=bool(row["viewer"]),
+                admin=bool(row["admin"]),
                 created_at=datetime.fromisoformat(row["created_at"]),
             )
 
@@ -206,6 +269,70 @@ class ChatStorage:
             cursor.execute("UPDATE users SET logo = ? WHERE username = ?", (logo, username))
             conn.commit()
             return cursor.rowcount > 0
+
+    def update_user_webhook(self, username: str, webhook_url: Optional[str]) -> bool:
+        """Update a user's webhook URL.
+
+        Args:
+            username: Username to update
+            webhook_url: New webhook URL (or None to clear)
+
+        Returns:
+            True if user was updated, False if not found
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET webhook_url = ? WHERE username = ?", (webhook_url, username))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def update_user_api_key(self, username: str, new_api_key: str) -> bool:
+        """Update a user's API key.
+
+        Args:
+            username: Username to update
+            new_api_key: New API key
+
+        Returns:
+            True if user was updated, False if not found
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET api_key = ? WHERE username = ?", (new_api_key, username))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def update_username(self, old_username: str, new_username: str) -> None:
+        """Update a user's username.
+
+        Args:
+            old_username: Current username
+            new_username: New username
+
+        Raises:
+            ValueError: If new username already exists or user not found
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Check if old user exists
+            cursor.execute("SELECT username FROM users WHERE username = ?", (old_username,))
+            if not cursor.fetchone():
+                raise ValueError(f"User {old_username} not found")
+
+            # Check if new username already exists
+            cursor.execute("SELECT username FROM users WHERE username = ?", (new_username,))
+            if cursor.fetchone():
+                raise ValueError(f"Username {new_username} already exists")
+
+            # Update username in users table
+            cursor.execute("UPDATE users SET username = ? WHERE username = ?", (new_username, old_username))
+
+            # Update username in messages table (both from and to)
+            cursor.execute("UPDATE messages SET from_username = ? WHERE from_username = ?", (new_username, old_username))
+            cursor.execute("UPDATE messages SET to_username = ? WHERE to_username = ?", (new_username, old_username))
+
+            conn.commit()
 
     def add_message(self, message: Message) -> None:
         """Add a message to storage.
@@ -384,9 +511,12 @@ class ChatStorage:
                 User(
                     username=row["username"],
                     api_key=row["api_key"],
+                    stytch_user_id=row["stytch_user_id"],
+                    email=row["email"],
                     webhook_url=HttpUrl(row["webhook_url"]) if row["webhook_url"] else None,
                     logo=row["logo"],
                     viewer=bool(row["viewer"]),
+                    admin=bool(row["admin"]),
                     created_at=datetime.fromisoformat(row["created_at"]),
                 )
                 for row in rows
@@ -407,9 +537,12 @@ class ChatStorage:
                 User(
                     username=row["username"],
                     api_key=row["api_key"],
+                    stytch_user_id=row["stytch_user_id"],
+                    email=row["email"],
                     webhook_url=HttpUrl(row["webhook_url"]) if row["webhook_url"] else None,
                     logo=row["logo"],
                     viewer=bool(row["viewer"]),
+                    admin=bool(row["admin"]),
                     created_at=datetime.fromisoformat(row["created_at"]),
                 )
                 for row in rows
@@ -427,6 +560,114 @@ class ChatStorage:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM users WHERE username = ?", (username,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def admin_update_user(
+        self,
+        username: str,
+        email: Optional[str] = None,
+        webhook_url: Optional[str] = None,
+        logo: Optional[str] = None,
+        viewer: Optional[bool] = None,
+        admin: Optional[bool] = None,
+    ) -> bool:
+        """Admin-only: Update any user's profile fields.
+
+        Args:
+            username: Username to update
+            email: New email (or None to skip)
+            webhook_url: New webhook URL (or None to skip)
+            logo: New logo (or None to skip)
+            viewer: New viewer status (or None to skip)
+            admin: New admin status (or None to skip)
+
+        Returns:
+            True if user was updated, False if not found
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Build update query dynamically
+            updates = []
+            params = []
+
+            if email is not None:
+                updates.append("email = ?")
+                params.append(email)
+            if webhook_url is not None:
+                updates.append("webhook_url = ?")
+                params.append(webhook_url)
+            if logo is not None:
+                updates.append("logo = ?")
+                params.append(logo)
+            if viewer is not None:
+                updates.append("viewer = ?")
+                params.append(1 if viewer else 0)
+            if admin is not None:
+                updates.append("admin = ?")
+                params.append(1 if admin else 0)
+
+            if not updates:
+                return False
+
+            params.append(username)
+            query = f"UPDATE users SET {', '.join(updates)} WHERE username = ?"
+
+            cursor.execute(query, params)
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def get_message_by_id(self, message_id: str) -> Optional[Message]:
+        """Get a message by its ID.
+
+        Args:
+            message_id: Message ID to look up
+
+        Returns:
+            Message if found, None otherwise
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM messages WHERE id = ?", (message_id,))
+            row = cursor.fetchone()
+
+            if not row:
+                return None
+
+            return self._row_to_message(row)
+
+    def delete_message(self, message_id: str) -> bool:
+        """Delete a message by ID.
+
+        Args:
+            message_id: Message ID to delete
+
+        Returns:
+            True if message was deleted, False if not found
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM messages WHERE id = ?", (message_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def update_message_content(self, message_id: str, content: str) -> bool:
+        """Update message content.
+
+        Args:
+            message_id: Message ID to update
+            content: New content
+
+        Returns:
+            True if message was updated, False if not found
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE messages SET content = ? WHERE id = ?",
+                (content, message_id),
+            )
             conn.commit()
             return cursor.rowcount > 0
 

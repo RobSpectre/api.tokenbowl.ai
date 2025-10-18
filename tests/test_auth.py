@@ -33,28 +33,28 @@ async def test_get_current_user_valid_key(test_storage):
     test_storage.add_user(user)
 
     # Get user with valid key
-    result = await get_current_user(api_key=api_key)
+    result = await get_current_user(api_key=api_key, authorization=None)
     assert result.username == "test_user"
 
 
 @pytest.mark.asyncio
 async def test_get_current_user_missing_key():
-    """Test getting current user with missing API key."""
+    """Test getting current user with missing API key or session token."""
     with pytest.raises(HTTPException) as exc_info:
-        await get_current_user(api_key=None)
+        await get_current_user(api_key=None, authorization=None)
 
     assert exc_info.value.status_code == 401
-    assert "Missing API key" in exc_info.value.detail
+    assert "Invalid or missing authentication credentials" in exc_info.value.detail
 
 
 @pytest.mark.asyncio
 async def test_get_current_user_invalid_key():
     """Test getting current user with invalid API key."""
     with pytest.raises(HTTPException) as exc_info:
-        await get_current_user(api_key="invalid_key")
+        await get_current_user(api_key="invalid_key", authorization=None)
 
     assert exc_info.value.status_code == 401
-    assert "Invalid API key" in exc_info.value.detail
+    assert "Invalid or missing authentication credentials" in exc_info.value.detail
 
 
 def test_validate_api_key_valid(test_storage):

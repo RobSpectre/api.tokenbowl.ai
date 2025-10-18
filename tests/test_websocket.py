@@ -246,7 +246,7 @@ async def test_websocket_auth_header(test_storage):
 
 @pytest.mark.asyncio
 async def test_websocket_auth_missing_key():
-    """Test WebSocket authentication with missing API key."""
+    """Test WebSocket authentication with missing credentials."""
     websocket = AsyncMock()
     websocket.query_params = {}
     websocket.headers = {}
@@ -254,7 +254,9 @@ async def test_websocket_auth_missing_key():
     result = await websocket_auth(websocket)
 
     assert result is None
-    websocket.close.assert_called_once_with(code=1008, reason="Missing API key")
+    websocket.close.assert_called_once_with(
+        code=1008, reason="Invalid or missing authentication credentials"
+    )
 
 
 @pytest.mark.asyncio
@@ -267,4 +269,109 @@ async def test_websocket_auth_invalid_key():
     result = await websocket_auth(websocket)
 
     assert result is None
-    websocket.close.assert_called_once_with(code=1008, reason="Invalid API key")
+    websocket.close.assert_called_once_with(
+        code=1008, reason="Invalid or missing authentication credentials"
+    )
+
+
+@pytest.mark.asyncio
+async def test_websocket_auth_stytch_session_token(test_storage):
+    """Test WebSocket authentication with Stytch session token."""
+    # Create a user with Stytch ID
+    user = User(username="test_user", api_key="a" * 64, stytch_user_id="stytch_123")
+    test_storage.add_user(user)
+
+    # Mock WebSocket with Stytch session token in Authorization header
+    websocket = AsyncMock()
+    websocket.query_params = {}
+    websocket.headers = {"authorization": "Bearer valid_session_token"}
+
+    # Mock stytch_client.validate_session to return the Stytch user ID
+    with patch("token_bowl_chat_server.stytch_client.stytch_client") as mock_stytch:
+        mock_stytch.validate_session = AsyncMock(return_value="stytch_123")
+
+        result = await websocket_auth(websocket)
+
+        assert result is not None
+        assert result.username == "test_user"
+        assert result.stytch_user_id == "stytch_123"
+        websocket.close.assert_not_called()
+        mock_stytch.validate_session.assert_called_once_with("valid_session_token")
+
+
+@pytest.mark.asyncio
+async def test_websocket_auth_invalid_stytch_token():
+    """Test WebSocket authentication with invalid Stytch session token."""
+    websocket = AsyncMock()
+    websocket.query_params = {}
+    websocket.headers = {"authorization": "Bearer invalid_session_token"}
+
+    # Mock stytch_client.validate_session to return None (invalid token)
+    with patch("token_bowl_chat_server.stytch_client.stytch_client") as mock_stytch:
+        mock_stytch.validate_session = AsyncMock(return_value=None)
+
+        result = await websocket_auth(websocket)
+
+        assert result is None
+        websocket.close.assert_called_once_with(
+            code=1008, reason="Invalid or missing authentication credentials"
+        )
+        mock_stytch.validate_session.assert_called_once_with("invalid_session_token")
+
+
+@pytest.mark.asyncio
+async def test_websocket_auth_stytch_token_user_not_found(test_storage):
+    """Test WebSocket authentication when Stytch user doesn't exist in database."""
+    websocket = AsyncMock()
+    websocket.query_params = {}
+    websocket.headers = {"authorization": "Bearer valid_session_token"}
+
+    # Mock stytch_client.validate_session to return a Stytch ID that's not in the database
+    with patch("token_bowl_chat_server.stytch_client.stytch_client") as mock_stytch:
+        mock_stytch.validate_session = AsyncMock(return_value="nonexistent_stytch_id")
+
+        result = await websocket_auth(websocket)
+
+        assert result is None
+        websocket.close.assert_called_once_with(
+            code=1008, reason="Invalid or missing authentication credentials"
+        )
+
+
+@pytest.mark.asyncio
+async def test_websocket_auth_api_key_priority(test_storage):
+    """Test that API key authentication is tried before Stytch token."""
+    # Create a user
+    user = User(username="test_user", api_key="a" * 64)
+    test_storage.add_user(user)
+
+    # Mock WebSocket with both API key and Stytch token
+    websocket = AsyncMock()
+    websocket.query_params = {"api_key": "a" * 64}
+    websocket.headers = {"authorization": "Bearer some_session_token"}
+
+    # Mock stytch_client - should not be called since API key is valid
+    with patch("token_bowl_chat_server.stytch_client.stytch_client") as mock_stytch:
+        mock_stytch.validate_session = AsyncMock(return_value="stytch_123")
+
+        result = await websocket_auth(websocket)
+
+        assert result is not None
+        assert result.username == "test_user"
+        # Stytch validation should not have been called
+        mock_stytch.validate_session.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_websocket_auth_malformed_authorization_header():
+    """Test WebSocket authentication with malformed Authorization header."""
+    websocket = AsyncMock()
+    websocket.query_params = {}
+    websocket.headers = {"authorization": "InvalidFormat"}  # Missing "Bearer " prefix
+
+    result = await websocket_auth(websocket)
+
+    assert result is None
+    websocket.close.assert_called_once_with(
+        code=1008, reason="Invalid or missing authentication credentials"
+    )
