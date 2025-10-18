@@ -66,6 +66,16 @@ class Message(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
+class ReadReceipt(BaseModel):
+    """Read receipt model tracking which messages users have read."""
+
+    model_config = ConfigDict(ser_json_timedelta="iso8601")
+
+    message_id: UUID
+    username: str = Field(..., min_length=1, max_length=50)
+    read_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
 class SendMessageRequest(BaseModel):
     """Request model for sending a message."""
 
@@ -230,3 +240,11 @@ class AdminMessageUpdate(BaseModel):
     """Admin request model for updating message content."""
 
     content: str = Field(..., min_length=1, max_length=10000)
+
+
+class UnreadCountResponse(BaseModel):
+    """Response model for unread message counts."""
+
+    unread_room_messages: int
+    unread_direct_messages: int
+    total_unread: int

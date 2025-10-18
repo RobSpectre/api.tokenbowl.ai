@@ -21,6 +21,7 @@ from .models import (
     StytchAuthenticateResponse,
     StytchLoginRequest,
     StytchLoginResponse,
+    UnreadCountResponse,
     UpdateLogoRequest,
     UpdateUsernameRequest,
     UpdateWebhookRequest,
@@ -391,6 +392,109 @@ async def get_direct_messages(
             has_more=has_more,
         ),
     )
+
+
+@router.get("/messages/unread", response_model=list[MessageResponse])
+async def get_unread_room_messages(
+    limit: int = 50,
+    offset: int = 0,
+    current_user: User = Depends(get_current_user),
+) -> list[MessageResponse]:
+    """Get unread room messages for the current user.
+
+    Args:
+        limit: Maximum number of messages to return (default: 50)
+        offset: Number of messages to skip (default: 0)
+        current_user: Authenticated user
+
+    Returns:
+        List of unread room messages
+    """
+    messages = storage.get_unread_room_messages(current_user.username, limit=limit, offset=offset)
+    return [MessageResponse.from_message(msg) for msg in messages]
+
+
+@router.get("/messages/direct/unread", response_model=list[MessageResponse])
+async def get_unread_direct_messages(
+    limit: int = 50,
+    offset: int = 0,
+    current_user: User = Depends(get_current_user),
+) -> list[MessageResponse]:
+    """Get unread direct messages for the current user.
+
+    Args:
+        limit: Maximum number of messages to return (default: 50)
+        offset: Number of messages to skip (default: 0)
+        current_user: Authenticated user
+
+    Returns:
+        List of unread direct messages
+    """
+    messages = storage.get_unread_direct_messages(current_user.username, limit=limit, offset=offset)
+    return [MessageResponse.from_message(msg) for msg in messages]
+
+
+@router.get("/messages/unread/count", response_model=UnreadCountResponse)
+async def get_unread_count(
+    current_user: User = Depends(get_current_user),
+) -> UnreadCountResponse:
+    """Get count of unread messages for the current user.
+
+    Args:
+        current_user: Authenticated user
+
+    Returns:
+        Count of unread room messages, direct messages, and total
+    """
+    unread_room, unread_direct, total_unread = storage.get_unread_count(current_user.username)
+    return UnreadCountResponse(
+        unread_room_messages=unread_room,
+        unread_direct_messages=unread_direct,
+        total_unread=total_unread,
+    )
+
+
+@router.post("/messages/{message_id}/read", status_code=status.HTTP_204_NO_CONTENT)
+async def mark_message_as_read(
+    message_id: str,
+    current_user: User = Depends(get_current_user),
+) -> None:
+    """Mark a message as read.
+
+    Args:
+        message_id: ID of the message to mark as read
+        current_user: Authenticated user
+
+    Raises:
+        HTTPException: If message doesn't exist
+    """
+    # Verify message exists
+    message = storage.get_message_by_id(message_id)
+    if not message:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Message {message_id} not found",
+        )
+
+    storage.mark_message_as_read(message_id, current_user.username)
+    logger.info(f"User {current_user.username} marked message {message_id} as read")
+
+
+@router.post("/messages/mark-all-read", response_model=dict[str, int])
+async def mark_all_messages_as_read(
+    current_user: User = Depends(get_current_user),
+) -> dict[str, int]:
+    """Mark all messages as read for the current user.
+
+    Args:
+        current_user: Authenticated user
+
+    Returns:
+        Number of messages marked as read
+    """
+    count = storage.mark_all_messages_as_read(current_user.username)
+    logger.info(f"User {current_user.username} marked {count} messages as read")
+    return {"marked_as_read": count}
 
 
 @router.get("/users", response_model=list[str])

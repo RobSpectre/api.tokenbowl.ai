@@ -359,6 +359,320 @@
         }
       }
     },
+    "/messages/unread": {
+      "get": {
+        "summary": "Get Unread Room Messages",
+        "description": "Get unread room messages for the current user.\n\nArgs:\n    limit: Maximum number of messages to return (default: 50)\n    offset: Number of messages to skip (default: 0)\n    current_user: Authenticated user\n\nReturns:\n    List of unread room messages",
+        "operationId": "get_unread_room_messages_messages_unread_get",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MessageResponse"
+                  },
+                  "title": "Response Get Unread Room Messages Messages Unread Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/messages/direct/unread": {
+      "get": {
+        "summary": "Get Unread Direct Messages",
+        "description": "Get unread direct messages for the current user.\n\nArgs:\n    limit: Maximum number of messages to return (default: 50)\n    offset: Number of messages to skip (default: 0)\n    current_user: Authenticated user\n\nReturns:\n    List of unread direct messages",
+        "operationId": "get_unread_direct_messages_messages_direct_unread_get",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MessageResponse"
+                  },
+                  "title": "Response Get Unread Direct Messages Messages Direct Unread Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/messages/unread/count": {
+      "get": {
+        "summary": "Get Unread Count",
+        "description": "Get count of unread messages for the current user.\n\nArgs:\n    current_user: Authenticated user\n\nReturns:\n    Count of unread room messages, direct messages, and total",
+        "operationId": "get_unread_count_messages_unread_count_get",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnreadCountResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/messages/{message_id}/read": {
+      "post": {
+        "summary": "Mark Message As Read",
+        "description": "Mark a message as read.\n\nArgs:\n    message_id: ID of the message to mark as read\n    current_user: Authenticated user\n\nRaises:\n    HTTPException: If message doesn't exist",
+        "operationId": "mark_message_as_read_messages__message_id__read_post",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Message Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/messages/mark-all-read": {
+      "post": {
+        "summary": "Mark All Messages As Read",
+        "description": "Mark all messages as read for the current user.\n\nArgs:\n    current_user: Authenticated user\n\nReturns:\n    Number of messages marked as read",
+        "operationId": "mark_all_messages_as_read_messages_mark_all_read_post",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "title": "Response Mark All Messages As Read Messages Mark All Read Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/users": {
       "get": {
         "summary": "Get Users",
@@ -1556,6 +1870,30 @@
         ],
         "title": "StytchLoginResponse",
         "description": "Response model for Stytch magic link send."
+      },
+      "UnreadCountResponse": {
+        "properties": {
+          "unread_room_messages": {
+            "type": "integer",
+            "title": "Unread Room Messages"
+          },
+          "unread_direct_messages": {
+            "type": "integer",
+            "title": "Unread Direct Messages"
+          },
+          "total_unread": {
+            "type": "integer",
+            "title": "Total Unread"
+          }
+        },
+        "type": "object",
+        "required": [
+          "unread_room_messages",
+          "unread_direct_messages",
+          "total_unread"
+        ],
+        "title": "UnreadCountResponse",
+        "description": "Response model for unread message counts."
       },
       "UpdateLogoRequest": {
         "properties": {

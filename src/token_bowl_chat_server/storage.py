@@ -86,6 +86,28 @@ class ChatStorage:
                     ON messages(from_username)
                 """)
 
+                # Create read_receipts table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS read_receipts (
+                        message_id TEXT NOT NULL,
+                        username TEXT NOT NULL,
+                        read_at TEXT NOT NULL,
+                        PRIMARY KEY (message_id, username),
+                        FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+                        FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE
+                    )
+                """)
+
+                # Create indexes for read_receipts
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_read_receipts_username
+                    ON read_receipts(username)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_read_receipts_message_id
+                    ON read_receipts(message_id)
+                """)
+
                 conn.commit()
         else:
             # For file-based databases, use Alembic migrations
@@ -688,6 +710,183 @@ class ChatStorage:
             message_type=MessageType(row["message_type"]),
             timestamp=datetime.fromisoformat(row["timestamp"]),
         )
+
+    def mark_message_as_read(self, message_id: str, username: str) -> bool:
+        """Mark a message as read by a user.
+
+        Args:
+            message_id: ID of the message to mark as read
+            username: Username marking the message as read
+
+        Returns:
+            True if read receipt was created, False if already exists
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Check if already read
+            cursor.execute(
+                "SELECT 1 FROM read_receipts WHERE message_id = ? AND username = ?",
+                (message_id, username),
+            )
+            if cursor.fetchone():
+                return False
+
+            # Insert read receipt
+            cursor.execute(
+                "INSERT INTO read_receipts (message_id, username, read_at) VALUES (?, ?, ?)",
+                (message_id, username, datetime.now().isoformat()),
+            )
+            conn.commit()
+            return True
+
+    def mark_all_messages_as_read(self, username: str) -> int:
+        """Mark all messages as read for a user.
+
+        Args:
+            username: Username to mark all messages as read for
+
+        Returns:
+            Number of messages marked as read
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Get all unread message IDs for this user
+            cursor.execute(
+                """
+                SELECT m.id FROM messages m
+                LEFT JOIN read_receipts rr
+                ON m.id = rr.message_id AND rr.username = ?
+                WHERE rr.message_id IS NULL
+                AND (m.to_username IS NULL OR m.to_username = ? OR m.from_username = ?)
+                AND m.from_username != ?
+                """,
+                (username, username, username, username),
+            )
+            unread_ids = [row["id"] for row in cursor.fetchall()]
+
+            if not unread_ids:
+                return 0
+
+            # Insert read receipts for all unread messages
+            read_at = datetime.now().isoformat()
+            cursor.executemany(
+                "INSERT OR IGNORE INTO read_receipts (message_id, username, read_at) VALUES (?, ?, ?)",
+                [(msg_id, username, read_at) for msg_id in unread_ids],
+            )
+            conn.commit()
+            return cursor.rowcount
+
+    def get_unread_room_messages(
+        self, username: str, limit: int = 50, offset: int = 0
+    ) -> list[Message]:
+        """Get unread room messages for a user.
+
+        Args:
+            username: Username to get unread messages for
+            limit: Maximum number of messages to return
+            offset: Number of messages to skip from the start
+
+        Returns:
+            List of unread room messages
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                SELECT m.* FROM messages m
+                LEFT JOIN read_receipts rr
+                ON m.id = rr.message_id AND rr.username = ?
+                WHERE m.to_username IS NULL
+                AND rr.message_id IS NULL
+                AND m.from_username != ?
+                ORDER BY m.timestamp ASC
+                LIMIT ? OFFSET ?
+                """,
+                (username, username, limit, offset),
+            )
+            rows = cursor.fetchall()
+
+            return [self._row_to_message(row) for row in rows]
+
+    def get_unread_direct_messages(
+        self, username: str, limit: int = 50, offset: int = 0
+    ) -> list[Message]:
+        """Get unread direct messages for a user.
+
+        Args:
+            username: Username to get unread messages for
+            limit: Maximum number of messages to return
+            offset: Number of messages to skip from the start
+
+        Returns:
+            List of unread direct messages
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                SELECT m.* FROM messages m
+                LEFT JOIN read_receipts rr
+                ON m.id = rr.message_id AND rr.username = ?
+                WHERE m.to_username IS NOT NULL
+                AND (m.to_username = ? OR m.from_username = ?)
+                AND rr.message_id IS NULL
+                AND m.from_username != ?
+                ORDER BY m.timestamp ASC
+                LIMIT ? OFFSET ?
+                """,
+                (username, username, username, username, limit, offset),
+            )
+            rows = cursor.fetchall()
+
+            return [self._row_to_message(row) for row in rows]
+
+    def get_unread_count(self, username: str) -> tuple[int, int, int]:
+        """Get count of unread messages for a user.
+
+        Args:
+            username: Username to count unread messages for
+
+        Returns:
+            Tuple of (unread_room_messages, unread_direct_messages, total_unread)
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Count unread room messages
+            cursor.execute(
+                """
+                SELECT COUNT(*) as count FROM messages m
+                LEFT JOIN read_receipts rr
+                ON m.id = rr.message_id AND rr.username = ?
+                WHERE m.to_username IS NULL
+                AND rr.message_id IS NULL
+                AND m.from_username != ?
+                """,
+                (username, username),
+            )
+            unread_room = cursor.fetchone()["count"]
+
+            # Count unread direct messages
+            cursor.execute(
+                """
+                SELECT COUNT(*) as count FROM messages m
+                LEFT JOIN read_receipts rr
+                ON m.id = rr.message_id AND rr.username = ?
+                WHERE m.to_username IS NOT NULL
+                AND (m.to_username = ? OR m.from_username = ?)
+                AND rr.message_id IS NULL
+                AND m.from_username != ?
+                """,
+                (username, username, username, username),
+            )
+            unread_direct = cursor.fetchone()["count"]
+
+            return unread_room, unread_direct, unread_room + unread_direct
 
 
 # Global storage instance
