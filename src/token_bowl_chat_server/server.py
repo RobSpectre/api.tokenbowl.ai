@@ -2,12 +2,15 @@
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .api import router
+from .config import settings
 from .webhook import webhook_delivery
 
 # Configure logging
@@ -66,6 +69,13 @@ def create_app() -> FastAPI:
 
     # Include API router
     app.include_router(router)
+
+    # Mount static files in dev mode only
+    if settings.reload:
+        public_dir = Path(__file__).parent.parent.parent / "public"
+        if public_dir.exists():
+            app.mount("/public", StaticFiles(directory=str(public_dir)), name="public")
+            logger.info(f"Static files mounted at /public from {public_dir}")
 
     return app
 

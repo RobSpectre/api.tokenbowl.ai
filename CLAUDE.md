@@ -86,7 +86,7 @@ alembic current
 
 ### Core Components
 
-**server.py**: FastAPI application factory and CORS configuration. The `lifespan` context manager handles webhook delivery startup/shutdown.
+**server.py**: FastAPI application factory and CORS configuration. The `lifespan` context manager handles webhook delivery startup/shutdown. In dev mode (when `reload=True`), static files from `/public` are served at `/public/*`.
 
 **api.py**: All REST endpoints and WebSocket endpoint. Contains business logic for message routing (WebSocket vs webhook delivery).
 
@@ -185,6 +185,7 @@ Environment variables (all optional):
 - **CORS**: Currently allows all origins (`allow_origins=["*"]`) - configure for production
 - **Database file**: `chat.db` in repository root (add to `.gitignore` if not already present)
 - **Webhook delivery**: Non-blocking with retry logic; failures are logged but don't block message sending
+- **Static files**: In dev mode only (`reload=True`), static files from `/public` directory are served at `/public/*` (e.g., `/public/images/claude-color.png`). This is disabled in production to avoid serving unnecessary files.
 
 ## Making Changes
 
