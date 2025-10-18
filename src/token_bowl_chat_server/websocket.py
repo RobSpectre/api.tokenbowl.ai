@@ -64,6 +64,29 @@ class ConnectionManager:
             self.disconnect(username)
             return False
 
+    async def send_notification(self, username: str, notification: dict) -> bool:
+        """Send a notification to a specific user via WebSocket.
+
+        Args:
+            username: Username to send notification to
+            notification: Notification data to send
+
+        Returns:
+            True if notification was sent successfully, False otherwise
+        """
+        websocket = self.active_connections.get(username)
+        if not websocket:
+            return False
+
+        try:
+            await websocket.send_json(notification)
+            logger.debug(f"Sent notification to {username} via WebSocket")
+            return True
+        except Exception as e:
+            logger.error(f"Error sending notification to {username}: {e}")
+            self.disconnect(username)
+            return False
+
     async def broadcast_to_room(
         self, message: Message, exclude_username: Optional[str] = None
     ) -> None:

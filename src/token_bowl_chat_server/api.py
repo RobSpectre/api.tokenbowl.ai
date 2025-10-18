@@ -943,13 +943,17 @@ async def admin_delete_message(
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
-    """WebSocket endpoint for real-time messaging.
+    """WebSocket endpoint for real-time messaging and read receipts.
 
     Connect with API key as query parameter: /ws?api_key=YOUR_API_KEY
     Or send API key in X-API-Key header
 
-    Once connected, you'll receive all room messages and direct messages sent to you.
-    You can also send messages through this WebSocket connection.
+    Supported message types:
+    - Send message: {"type": "message", "content": "...", "to_username": "..."}
+      or {"content": "...", "to_username": "..."} (backward compatible)
+    - Mark as read: {"type": "mark_read", "message_id": "..."}
+    - Mark all as read: {"type": "mark_all_read"}
+    - Get unread count: {"type": "get_unread_count"}
 
     Args:
         websocket: WebSocket connection
@@ -962,74 +966,159 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
     try:
         while True:
-            # Receive message from client
+            # Receive data from client
             data = await websocket.receive_json()
 
-            # Parse message data
-            content = data.get("content")
-            to_username = data.get("to_username")
+            # Determine message type (default to "message" for backward compatibility)
+            msg_type = data.get("type", "message")
 
-            if not content:
-                await websocket.send_json({"error": "Missing content field"})
-                continue
+            # Handle different message types
+            if msg_type == "message":
+                # Send a message
+                content = data.get("content")
+                to_username = data.get("to_username")
 
-            # Validate recipient if direct message
-            if to_username:
-                recipient = storage.get_user_by_username(to_username)
-                if not recipient:
-                    await websocket.send_json({"error": f"User {to_username} not found"})
+                if not content:
+                    await websocket.send_json({"type": "error", "error": "Missing content field"})
                     continue
-                if recipient.viewer:
+
+                # Validate recipient if direct message
+                if to_username:
+                    recipient = storage.get_user_by_username(to_username)
+                    if not recipient:
+                        await websocket.send_json(
+                            {"type": "error", "error": f"User {to_username} not found"}
+                        )
+                        continue
+                    if recipient.viewer:
+                        await websocket.send_json(
+                            {
+                                "type": "error",
+                                "error": f"Cannot send messages to viewer user {to_username}",
+                            }
+                        )
+                        continue
+
+                # Create and store message
+                message_type = MessageType.DIRECT if to_username else MessageType.ROOM
+                message = Message(
+                    from_username=user.username,
+                    to_username=to_username,
+                    content=content,
+                    message_type=message_type,
+                )
+                storage.add_message(message)
+
+                logger.info(
+                    f"WebSocket message from {user.username} to "
+                    f"{'room' if not to_username else to_username}"
+                )
+
+                # Deliver message
+                if message_type == MessageType.ROOM:
+                    # Broadcast to all users except sender
+                    await connection_manager.broadcast_to_room(
+                        message, exclude_username=user.username
+                    )
+
+                    # Send via webhooks to chat users who aren't connected
+                    chat_users = storage.get_chat_users()
+                    webhook_users = [
+                        u
+                        for u in chat_users
+                        if u.webhook_url
+                        and u.username != user.username
+                        and not connection_manager.is_connected(u.username)
+                    ]
+                    await webhook_delivery.broadcast_to_webhooks(message, webhook_users)
+
+                else:
+                    # Direct message
+                    recipient = storage.get_user_by_username(to_username)  # type: ignore
+                    if recipient:
+                        sent_via_ws = await connection_manager.send_message(
+                            recipient.username, message
+                        )
+
+                        if not sent_via_ws and recipient.webhook_url:
+                            await webhook_delivery.deliver_message(recipient, message)
+
+                # Send confirmation back to sender
+                await websocket.send_json(
+                    {
+                        "type": "message_sent",
+                        "status": "sent",
+                        "message": MessageResponse.from_message(message).model_dump(),
+                    }
+                )
+
+            elif msg_type == "mark_read":
+                # Mark a message as read
+                message_id = data.get("message_id")
+
+                if not message_id:
                     await websocket.send_json(
-                        {"error": f"Cannot send messages to viewer user {to_username}"}
+                        {"type": "error", "error": "Missing message_id field"}
                     )
                     continue
 
-            # Create and store message
-            message_type = MessageType.DIRECT if to_username else MessageType.ROOM
-            message = Message(
-                from_username=user.username,
-                to_username=to_username,
-                content=content,
-                message_type=message_type,
-            )
-            storage.add_message(message)
+                # Verify message exists
+                message = storage.get_message_by_id(message_id)
+                if not message:
+                    await websocket.send_json(
+                        {"type": "error", "error": f"Message {message_id} not found"}
+                    )
+                    continue
 
-            logger.info(
-                f"WebSocket message from {user.username} to "
-                f"{'room' if not to_username else to_username}"
-            )
+                # Mark as read
+                was_created = storage.mark_message_as_read(message_id, user.username)
 
-            # Deliver message
-            if message_type == MessageType.ROOM:
-                # Broadcast to all users except sender
-                await connection_manager.broadcast_to_room(message, exclude_username=user.username)
+                if was_created:
+                    logger.info(f"User {user.username} marked message {message_id} as read")
 
-                # Send via webhooks to chat users who aren't connected
-                # Viewers are excluded as they cannot receive direct messages
-                chat_users = storage.get_chat_users()
-                webhook_users = [
-                    u
-                    for u in chat_users
-                    if u.webhook_url
-                    and u.username != user.username
-                    and not connection_manager.is_connected(u.username)
-                ]
-                await webhook_delivery.broadcast_to_webhooks(message, webhook_users)
+                    # Send read receipt notification to the message sender
+                    # Only send if sender is connected and sender is not the reader
+                    if message.from_username != user.username:
+                        await connection_manager.send_notification(
+                            message.from_username,
+                            {
+                                "type": "read_receipt",
+                                "message_id": message_id,
+                                "read_by": user.username,
+                            },
+                        )
+
+                # Confirm to the reader
+                await websocket.send_json(
+                    {"type": "marked_read", "message_id": message_id, "status": "success"}
+                )
+
+            elif msg_type == "mark_all_read":
+                # Mark all messages as read
+                count = storage.mark_all_messages_as_read(user.username)
+                logger.info(f"User {user.username} marked {count} messages as read via WebSocket")
+
+                await websocket.send_json(
+                    {"type": "marked_all_read", "marked_as_read": count, "status": "success"}
+                )
+
+            elif msg_type == "get_unread_count":
+                # Get unread count
+                unread_room, unread_direct, total_unread = storage.get_unread_count(user.username)
+
+                await websocket.send_json(
+                    {
+                        "type": "unread_count",
+                        "unread_room_messages": unread_room,
+                        "unread_direct_messages": unread_direct,
+                        "total_unread": total_unread,
+                    }
+                )
 
             else:
-                # Direct message
-                recipient = storage.get_user_by_username(to_username)  # type: ignore
-                if recipient:
-                    sent_via_ws = await connection_manager.send_message(recipient.username, message)
-
-                    if not sent_via_ws and recipient.webhook_url:
-                        await webhook_delivery.deliver_message(recipient, message)
-
-            # Send confirmation back to sender
-            await websocket.send_json(
-                {"status": "sent", "message": MessageResponse.from_message(message).model_dump()}
-            )
+                await websocket.send_json(
+                    {"type": "error", "error": f"Unknown message type: {msg_type}"}
+                )
 
     except WebSocketDisconnect:
         connection_manager.disconnect(user.username)

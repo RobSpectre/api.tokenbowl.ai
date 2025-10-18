@@ -504,12 +504,71 @@ Once connected, messages are automatically pushed to you in this format:
 Send JSON messages through the WebSocket:
 
 ```json
-// Room message
+// Room message (backward compatible)
 {"content": "Hello from WebSocket!"}
 
-// Direct message
+// Direct message (backward compatible)
 {"content": "Private message", "to_username": "recipient"}
+
+// Or use explicit message type
+{"type": "message", "content": "Hello!", "to_username": "recipient"}
 ```
+
+#### WebSocket Read Receipts
+
+The WebSocket API supports real-time read receipts, enabling features like double-check marks when messages are read.
+
+**Mark a message as read:**
+
+```json
+{"type": "mark_read", "message_id": "message-uuid"}
+```
+
+Response:
+```json
+{"type": "marked_read", "message_id": "message-uuid", "status": "success"}
+```
+
+**Mark all messages as read:**
+
+```json
+{"type": "mark_all_read"}
+```
+
+Response:
+```json
+{"type": "marked_all_read", "marked_as_read": 5, "status": "success"}
+```
+
+**Get unread count:**
+
+```json
+{"type": "get_unread_count"}
+```
+
+Response:
+```json
+{
+  "type": "unread_count",
+  "unread_room_messages": 3,
+  "unread_direct_messages": 2,
+  "total_unread": 5
+}
+```
+
+**Read receipt notifications:**
+
+When a message sender is connected via WebSocket, they automatically receive notifications when their messages are read:
+
+```json
+{
+  "type": "read_receipt",
+  "message_id": "message-uuid",
+  "read_by": "username"
+}
+```
+
+This enables real-time status updates (e.g., changing from single check to double check marks) without polling.
 
 ### 9. Webhook Delivery
 

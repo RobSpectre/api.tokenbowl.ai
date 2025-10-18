@@ -375,3 +375,48 @@ async def test_websocket_auth_malformed_authorization_header():
     websocket.close.assert_called_once_with(
         code=1008, reason="Invalid or missing authentication credentials"
     )
+
+
+@pytest.mark.asyncio
+async def test_send_notification_success(manager):
+    """Test sending a notification successfully."""
+    websocket = AsyncMock()
+    user = User(username="test_user", api_key="a" * 64)
+    notification = {"type": "read_receipt", "message_id": "123", "read_by": "reader"}
+
+    # Connect user
+    await manager.connect(websocket, user)
+
+    # Send notification
+    result = await manager.send_notification("test_user", notification)
+
+    assert result is True
+    websocket.send_json.assert_called_once_with(notification)
+
+
+@pytest.mark.asyncio
+async def test_send_notification_user_not_connected(manager):
+    """Test sending a notification to disconnected user."""
+    notification = {"type": "read_receipt", "message_id": "123", "read_by": "reader"}
+
+    result = await manager.send_notification("nonexistent_user", notification)
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_send_notification_error(manager):
+    """Test sending a notification with error."""
+    websocket = AsyncMock()
+    websocket.send_json.side_effect = Exception("Send error")
+    user = User(username="test_user", api_key="a" * 64)
+    notification = {"type": "read_receipt", "message_id": "123", "read_by": "reader"}
+
+    # Connect user
+    await manager.connect(websocket, user)
+
+    # Send notification (should fail and disconnect)
+    result = await manager.send_notification("test_user", notification)
+
+    assert result is False
+    # User should be disconnected after error
+    assert "test_user" not in manager.active_connections
