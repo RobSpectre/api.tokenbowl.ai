@@ -1,0 +1,11 @@
+[Unit]
+Description=Token Bowl Chat Deployment Check Timer
+Requires=token-bowl-deploy.service
+
+[Timer]
+# Check for new releases every 5 minutes
+OnBootSec=2min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

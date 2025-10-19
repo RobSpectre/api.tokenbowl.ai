@@ -7,6 +7,7 @@ import stytch
 from stytch.core.response_base import StytchError
 
 from .config import settings
+from .models import Role
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +126,67 @@ class StytchClient:
             return response.user_id
         except StytchError as e:
             logger.debug(f"Session validation failed: {e}")
+            return None
+
+    async def set_user_role(self, stytch_user_id: str, role: Role) -> bool:
+        """Set a user's role in Stytch trusted_metadata.
+
+        Args:
+            stytch_user_id: Stytch user ID
+            role: Role to assign
+
+        Returns:
+            True if role was updated successfully
+
+        Raises:
+            RuntimeError: If Stytch is not enabled
+            StytchError: If Stytch API call fails
+        """
+        if not self._client:
+            raise RuntimeError("Stytch is not enabled")
+
+        try:
+            # Update user's trusted_metadata with role
+            await self._client.users.update_async(
+                user_id=stytch_user_id,
+                trusted_metadata={"role": role.value},
+            )
+            logger.info(f"Updated role for Stytch user {stytch_user_id} to {role.value}")
+            return True
+        except StytchError as e:
+            logger.error(f"Failed to update user role in Stytch: {e}")
+            raise
+
+    async def get_user_role(self, stytch_user_id: str) -> Optional[Role]:
+        """Get a user's role from Stytch trusted_metadata.
+
+        Args:
+            stytch_user_id: Stytch user ID
+
+        Returns:
+            User's role if found, None otherwise
+        """
+        if not self._client:
+            return None
+
+        try:
+            # Get user from Stytch
+            response = await self._client.users.get_async(user_id=stytch_user_id)
+
+            # Extract role from trusted_metadata
+            if hasattr(response, "trusted_metadata") and response.trusted_metadata:
+                role_str = response.trusted_metadata.get("role")
+                if role_str:
+                    try:
+                        return Role(role_str)
+                    except ValueError:
+                        logger.warning(
+                            f"Invalid role '{role_str}' in Stytch metadata for user {stytch_user_id}"
+                        )
+
+            return None
+        except StytchError as e:
+            logger.error(f"Failed to get user from Stytch: {e}")
             return None
 
 

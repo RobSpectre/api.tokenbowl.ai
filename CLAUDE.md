@@ -82,6 +82,14 @@ alembic history
 alembic current
 ```
 
+**CRITICAL: Always create and apply a migration immediately after modifying the data model.** When you add fields to models, change storage logic, or modify database schema in code, you MUST:
+1. Create a migration: `alembic revision -m "description"`
+2. Write the upgrade/downgrade SQL in the migration file
+3. Apply it: `alembic upgrade head`
+4. Update `_init_db()` in `storage.py` for in-memory databases (tests)
+
+Failure to do this causes schema drift where the code expects columns/tables that don't exist in the database. This leads to application crashes and requires wiping user data to fix. The database schema must always match the code expectations.
+
 ## Architecture
 
 ### Core Components

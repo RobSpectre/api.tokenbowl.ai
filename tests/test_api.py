@@ -299,8 +299,15 @@ def test_get_users(client, registered_user, registered_user2):
     response = client.get("/users", headers=headers)
     assert response.status_code == 200
     users = response.json()
-    assert "test_user" in users
-    assert "test_user2" in users
+    usernames = [user["username"] for user in users]
+    assert "test_user" in usernames
+    assert "test_user2" in usernames
+    # Verify structure includes display info
+    assert all("username" in user for user in users)
+    assert all("logo" in user for user in users)
+    assert all("emoji" in user for user in users)
+    assert all("bot" in user for user in users)
+    assert all("viewer" in user for user in users)
 
 
 def test_get_online_users(client, registered_user):
@@ -961,3 +968,530 @@ def test_admin_delete_message_without_admin(client, registered_user):
     fake_uuid = "00000000-0000-0000-0000-000000000000"
     response = client.delete(f"/admin/messages/{fake_uuid}", headers=headers)
     assert response.status_code == 403
+
+
+def test_get_user_profile(client, registered_user, registered_user2):
+    """Test getting a public user profile."""
+    headers = {"X-API-Key": registered_user["api_key"]}
+    
+    # Get the other user's profile
+    response = client.get(f"/users/{registered_user2['username']}", headers=headers)
+    
+    assert response.status_code == 200
+    data = response.json()
+    assert data["username"] == registered_user2["username"]
+    assert "logo" in data
+    assert "emoji" in data
+    assert "bot" in data
+    assert "viewer" in data
+    
+    # Should NOT include sensitive data
+    assert "api_key" not in data
+    assert "email" not in data
+    assert "webhook_url" not in data
+    assert "created_at" not in data
+
+
+def test_get_user_profile_not_found(client, registered_user):
+    """Test getting a profile for non-existent user."""
+    headers = {"X-API-Key": registered_user["api_key"]}
+    
+    response = client.get("/users/nonexistent_user", headers=headers)
+    
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"].lower()
+
+
+def test_get_user_profile_with_logo_and_emoji(client, registered_user):
+    """Test getting profile of user with logo and emoji."""
+    # Create a bot with emoji via /bots endpoint
+    bot_response = client.post(
+        "/bots",
+        json={
+            "username": "test_bot",
+            "emoji": "🤖",
+        },
+        headers={"X-API-Key": registered_user["api_key"]},
+    )
+    assert bot_response.status_code == 201
+    bot_api_key = bot_response.json()["api_key"]
+
+    # Register a regular user with logo
+    user_response = client.post(
+        "/register",
+        json={
+            "username": "logo_user",
+            "logo": "openai.png",
+        },
+    )
+    user_api_key = user_response.json()["api_key"]
+
+    # Bot gets user profile
+    response = client.get(
+        "/users/logo_user",
+        headers={"X-API-Key": bot_api_key},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["username"] == "logo_user"
+    assert data["logo"] == "openai.png"
+    assert data["emoji"] is None
+    assert data["bot"] is False
+    assert data["viewer"] is False
+
+    # User gets bot profile
+    response = client.get(
+        "/users/test_bot",
+        headers={"X-API-Key": user_api_key},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["username"] == "test_bot"
+    assert data["logo"] is None
+    assert data["emoji"] == "🤖"
+    assert data["bot"] is True
+    assert data["viewer"] is False
+
+
+def test_get_user_profile_viewer(client, registered_user):
+    """Test getting profile of a viewer user."""
+    # Register a viewer
+    viewer_response = client.post(
+        "/register",
+        json={
+            "username": "viewer_user",
+            "viewer": True,
+        },
+    )
+    
+    # Get viewer profile
+    headers = {"X-API-Key": registered_user["api_key"]}
+    response = client.get("/users/viewer_user", headers=headers)
+    
+    assert response.status_code == 200
+    data = response.json()
+    assert data["username"] == "viewer_user"
+    assert data["viewer"] is True
+    assert data["bot"] is False
+
+
+def test_get_user_profile_requires_auth(client):
+    """Test that getting user profile requires authentication."""
+    response = client.get("/users/someuser")
+
+    assert response.status_code == 401
+
+
+# WebSocket message history and user discovery tests
+
+
+def test_websocket_get_messages(client, registered_user):
+    """Test getting room message history via WebSocket."""
+    headers = {"X-API-Key": registered_user["api_key"]}
+
+    # Send some room messages first
+    for i in range(5):
+        client.post(
+            "/messages",
+            json={"content": f"Room message {i}"},
+            headers=headers,
+        )
+
+    # Connect via WebSocket and request message history
+    with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as websocket:
+        # Request all messages
+        websocket.send_json({"type": "get_messages"})
+
+        # Receive response
+        data = websocket.receive_json()
+        assert data["type"] == "messages"
+        assert "messages" in data
+        assert "pagination" in data
+        assert len(data["messages"]) == 5
+        assert data["pagination"]["total"] == 5
+        assert data["pagination"]["offset"] == 0
+        assert data["pagination"]["limit"] == 50
+        assert data["pagination"]["has_more"] is False
+
+        # Verify message structure includes display info
+        for msg in data["messages"]:
+            assert "from_username" in msg
+            assert "from_user_logo" in msg
+            assert "from_user_emoji" in msg
+            assert "from_user_bot" in msg
+
+
+def test_websocket_get_messages_with_pagination(client, registered_user):
+    """Test getting room messages with pagination via WebSocket."""
+    headers = {"X-API-Key": registered_user["api_key"]}
+
+    # Send 10 room messages
+    for i in range(10):
+        client.post(
+            "/messages",
+            json={"content": f"Message {i}"},
+            headers=headers,
+        )
+
+    with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as websocket:
+        # Request first page
+        websocket.send_json({"type": "get_messages", "limit": 3, "offset": 0})
+        data = websocket.receive_json()
+
+        assert data["type"] == "messages"
+        assert len(data["messages"]) == 3
+        assert data["messages"][0]["content"] == "Message 0"
+        assert data["messages"][2]["content"] == "Message 2"
+        assert data["pagination"]["total"] == 10
+        assert data["pagination"]["offset"] == 0
+        assert data["pagination"]["limit"] == 3
+        assert data["pagination"]["has_more"] is True
+
+        # Request second page
+        websocket.send_json({"type": "get_messages", "limit": 3, "offset": 3})
+        data = websocket.receive_json()
+
+        assert len(data["messages"]) == 3
+        assert data["messages"][0]["content"] == "Message 3"
+        assert data["pagination"]["offset"] == 3
+        assert data["pagination"]["has_more"] is True
+
+
+def test_websocket_get_messages_with_since(client, registered_user):
+    """Test getting room messages with since timestamp via WebSocket."""
+    from datetime import datetime, UTC, timedelta
+
+    headers = {"X-API-Key": registered_user["api_key"]}
+
+    # Send some messages
+    client.post("/messages", json={"content": "Old message 1"}, headers=headers)
+    client.post("/messages", json={"content": "Old message 2"}, headers=headers)
+
+    # Get current time for since parameter
+    since_time = datetime.now(UTC)
+
+    # Send more messages after the timestamp
+    client.post("/messages", json={"content": "New message 1"}, headers=headers)
+    client.post("/messages", json={"content": "New message 2"}, headers=headers)
+
+    with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as websocket:
+        # Request messages since timestamp
+        websocket.send_json({
+            "type": "get_messages",
+            "since": since_time.isoformat()
+        })
+
+        data = websocket.receive_json()
+        assert data["type"] == "messages"
+        # Should only get the 2 new messages
+        assert len(data["messages"]) >= 2
+        contents = [msg["content"] for msg in data["messages"]]
+        assert "New message 1" in contents
+        assert "New message 2" in contents
+
+
+def test_websocket_get_messages_invalid_since(client, registered_user):
+    """Test getting messages with invalid since timestamp via WebSocket."""
+    with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as websocket:
+        # Request messages with invalid timestamp
+        websocket.send_json({
+            "type": "get_messages",
+            "since": "invalid_timestamp"
+        })
+
+        data = websocket.receive_json()
+        assert data["type"] == "error"
+        assert "Invalid timestamp format" in data["error"]
+
+
+def test_websocket_get_direct_messages(client, registered_user, registered_user2):
+    """Test getting direct message history via WebSocket."""
+    headers1 = {"X-API-Key": registered_user["api_key"]}
+    headers2 = {"X-API-Key": registered_user2["api_key"]}
+
+    # Send some direct messages
+    client.post(
+        "/messages",
+        json={"content": "DM 1 to user2", "to_username": "test_user2"},
+        headers=headers1,
+    )
+    client.post(
+        "/messages",
+        json={"content": "DM 2 to user1", "to_username": "test_user"},
+        headers=headers2,
+    )
+    client.post(
+        "/messages",
+        json={"content": "DM 3 to user2", "to_username": "test_user2"},
+        headers=headers1,
+    )
+
+    # User 1 gets their direct messages
+    with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as websocket:
+        websocket.send_json({"type": "get_direct_messages"})
+
+        data = websocket.receive_json()
+        assert data["type"] == "direct_messages"
+        assert "messages" in data
+        assert "pagination" in data
+        assert len(data["messages"]) == 3
+
+        # All messages should involve user1
+        for msg in data["messages"]:
+            assert msg["from_username"] in ["test_user", "test_user2"]
+            assert msg["to_username"] in ["test_user", "test_user2"]
+            assert msg["message_type"] == "direct"
+
+
+def test_websocket_get_direct_messages_with_pagination(client, registered_user, registered_user2):
+    """Test getting direct messages with pagination via WebSocket."""
+    headers1 = {"X-API-Key": registered_user["api_key"]}
+
+    # Send 5 direct messages
+    for i in range(5):
+        client.post(
+            "/messages",
+            json={"content": f"DM {i}", "to_username": "test_user2"},
+            headers=headers1,
+        )
+
+    with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as websocket:
+        # Request first page
+        websocket.send_json({"type": "get_direct_messages", "limit": 2, "offset": 0})
+        data = websocket.receive_json()
+
+        assert data["type"] == "direct_messages"
+        assert len(data["messages"]) == 2
+        assert data["pagination"]["total"] == 5
+        assert data["pagination"]["has_more"] is True
+
+
+def test_websocket_get_unread_messages(client, registered_user, registered_user2):
+    """Test getting unread room messages via WebSocket."""
+    headers = {"X-API-Key": registered_user2["api_key"]}
+
+    # User 2 sends room messages
+    for i in range(3):
+        client.post(
+            "/messages",
+            json={"content": f"Unread room message {i}"},
+            headers=headers,
+        )
+
+    # User 1 gets unread messages (hasn't marked any as read)
+    with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as websocket:
+        websocket.send_json({"type": "get_unread_messages"})
+
+        data = websocket.receive_json()
+        assert data["type"] == "unread_messages"
+        assert "messages" in data
+        assert len(data["messages"]) >= 3
+
+
+def test_websocket_get_unread_direct_messages(client, registered_user, registered_user2):
+    """Test getting unread direct messages via WebSocket."""
+    headers2 = {"X-API-Key": registered_user2["api_key"]}
+
+    # User 2 sends DMs to user 1
+    for i in range(3):
+        client.post(
+            "/messages",
+            json={"content": f"Unread DM {i}", "to_username": "test_user"},
+            headers=headers2,
+        )
+
+    # User 1 gets unread DMs
+    with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as websocket:
+        websocket.send_json({"type": "get_unread_direct_messages"})
+
+        data = websocket.receive_json()
+        assert data["type"] == "unread_direct_messages"
+        assert "messages" in data
+        assert len(data["messages"]) >= 3
+
+        # All should be DMs to user1
+        for msg in data["messages"]:
+            assert msg["to_username"] == "test_user"
+            assert msg["message_type"] == "direct"
+
+
+def test_websocket_get_users(client, registered_user, registered_user2):
+    """Test getting all users via WebSocket."""
+    with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as websocket:
+        websocket.send_json({"type": "get_users"})
+
+        data = websocket.receive_json()
+        assert data["type"] == "users"
+        assert "users" in data
+        assert isinstance(data["users"], list)
+        assert len(data["users"]) >= 2
+
+        # Verify structure
+        usernames = [user["username"] for user in data["users"]]
+        assert "test_user" in usernames
+        assert "test_user2" in usernames
+
+        # Verify all users have required fields
+        for user in data["users"]:
+            assert "username" in user
+            assert "logo" in user
+            assert "emoji" in user
+            assert "bot" in user
+            assert "viewer" in user
+
+
+def test_websocket_get_online_users(client, registered_user, registered_user2):
+    """Test getting online users via WebSocket."""
+    # Connect user2 via WebSocket
+    with client.websocket_connect(f"/ws?api_key={registered_user2['api_key']}") as ws2:
+        # User1 requests online users
+        with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as ws1:
+            ws1.send_json({"type": "get_online_users"})
+
+            data = ws1.receive_json()
+            assert data["type"] == "online_users"
+            assert "users" in data
+            assert isinstance(data["users"], list)
+
+            # Both users should be online
+            usernames = [user["username"] for user in data["users"]]
+            assert "test_user" in usernames
+            assert "test_user2" in usernames
+
+            # Verify structure
+            for user in data["users"]:
+                assert "username" in user
+                assert "logo" in user
+                assert "emoji" in user
+                assert "bot" in user
+                assert "viewer" in user
+
+
+def test_websocket_get_user_profile(client, registered_user, registered_user2):
+    """Test getting user profile via WebSocket."""
+    with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as websocket:
+        # Request user2's profile
+        websocket.send_json({"type": "get_user_profile", "username": "test_user2"})
+
+        data = websocket.receive_json()
+        assert data["type"] == "user_profile"
+        assert "user" in data
+        assert data["user"]["username"] == "test_user2"
+        assert "logo" in data["user"]
+        assert "emoji" in data["user"]
+        assert "bot" in data["user"]
+        assert "viewer" in data["user"]
+
+        # Should NOT include sensitive data
+        assert "api_key" not in data["user"]
+        assert "email" not in data["user"]
+        assert "webhook_url" not in data["user"]
+
+
+def test_websocket_get_user_profile_not_found(client, registered_user):
+    """Test getting non-existent user profile via WebSocket."""
+    with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as websocket:
+        # Request non-existent user
+        websocket.send_json({"type": "get_user_profile", "username": "nonexistent_user"})
+
+        data = websocket.receive_json()
+        assert data["type"] == "error"
+        assert "not found" in data["error"].lower()
+
+
+def test_websocket_get_user_profile_missing_username(client, registered_user):
+    """Test getting user profile without username via WebSocket."""
+    with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as websocket:
+        # Request without username
+        websocket.send_json({"type": "get_user_profile"})
+
+        data = websocket.receive_json()
+        assert data["type"] == "error"
+        assert "username" in data["error"].lower()
+
+
+def test_websocket_mark_room_read(client, registered_user, registered_user2):
+    """Test marking room messages as read via WebSocket."""
+    headers2 = {"X-API-Key": registered_user2["api_key"]}
+
+    # User 2 sends room messages
+    client.post("/messages", json={"content": "Room message 1"}, headers=headers2)
+    client.post("/messages", json={"content": "Room message 2"}, headers=headers2)
+
+    with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as websocket:
+        # Check unread messages first
+        websocket.send_json({"type": "get_unread_messages"})
+        data = websocket.receive_json()
+        initial_unread = len(data["messages"])
+        assert initial_unread >= 2
+
+        # Mark as read
+        websocket.send_json({"type": "mark_room_read"})
+        data = websocket.receive_json()
+        assert data["status"] == "marked_read"
+
+        # Check unread again - should be 0
+        websocket.send_json({"type": "get_unread_messages"})
+        data = websocket.receive_json()
+        assert len(data["messages"]) == 0
+
+
+def test_websocket_mark_direct_read(client, registered_user, registered_user2):
+    """Test marking direct messages as read via WebSocket."""
+    headers2 = {"X-API-Key": registered_user2["api_key"]}
+
+    # User 2 sends DMs to user 1
+    client.post(
+        "/messages",
+        json={"content": "DM 1", "to_username": "test_user"},
+        headers=headers2,
+    )
+    client.post(
+        "/messages",
+        json={"content": "DM 2", "to_username": "test_user"},
+        headers=headers2,
+    )
+
+    with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as websocket:
+        # Check unread DMs first
+        websocket.send_json({"type": "get_unread_direct_messages"})
+        data = websocket.receive_json()
+        initial_unread = len(data["messages"])
+        assert initial_unread >= 2
+
+        # Mark as read
+        websocket.send_json({"type": "mark_direct_read", "from_username": "test_user2"})
+        data = websocket.receive_json()
+        assert data["status"] == "marked_read"
+
+        # Check unread again - should be 0 from user2
+        websocket.send_json({"type": "get_unread_direct_messages"})
+        data = websocket.receive_json()
+        # No messages from user2 should be unread
+        user2_unread = [msg for msg in data["messages"] if msg["from_username"] == "test_user2"]
+        assert len(user2_unread) == 0
+
+
+def test_websocket_unknown_message_type(client, registered_user):
+    """Test WebSocket with unknown message type."""
+    with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as websocket:
+        # Send unknown type
+        websocket.send_json({"type": "unknown_type", "data": "test"})
+
+        data = websocket.receive_json()
+        assert data["type"] == "error"
+        assert "Unknown message type" in data["error"]
+
+
+def test_websocket_message_type_missing(client, registered_user):
+    """Test WebSocket message without type field."""
+    with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as websocket:
+        # Send message without type
+        websocket.send_json({"content": "Test"})
+
+        # Should still work as a regular room message (backward compatibility)
+        data = websocket.receive_json()
+        assert data["status"] == "sent"
+        assert data["message"]["content"] == "Test"

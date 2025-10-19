@@ -55,7 +55,10 @@ class ConnectionManager:
             return False
 
         try:
-            message_data = MessageResponse.from_message(message).model_dump()
+            # Fetch sender user info for display
+            from .storage import storage
+            from_user = storage.get_user_by_username(message.from_username)
+            message_data = MessageResponse.from_message(message, from_user=from_user).model_dump()
             await websocket.send_json(message_data)
             logger.debug(f"Sent message to {username} via WebSocket")
             return True
@@ -97,7 +100,11 @@ class ConnectionManager:
             exclude_username: Username to exclude from broadcast (e.g., the sender)
         """
         disconnected_users = []
-        message_data = MessageResponse.from_message(message).model_dump()
+
+        # Fetch sender user info for display
+        from .storage import storage
+        from_user = storage.get_user_by_username(message.from_username)
+        message_data = MessageResponse.from_message(message, from_user=from_user).model_dump()
 
         for username, websocket in self.active_connections.items():
             if exclude_username and username == exclude_username:
@@ -152,8 +159,11 @@ async def websocket_auth(websocket: WebSocket) -> Optional[User]:
     Returns:
         Authenticated user or None if authentication fails
     """
+    logger.info(f"[DEBUG] WebSocket auth attempt from {websocket.client}")
+
     # Try API key authentication first (query param or header)
     api_key = websocket.query_params.get("api_key")
+    logger.info(f"[DEBUG] API key from query params: {'present' if api_key else 'missing'}")
 
     if not api_key:
         # Try to get from headers
@@ -179,5 +189,6 @@ async def websocket_auth(websocket: WebSocket) -> Optional[User]:
                 return user
 
     # No valid authentication provided
+    logger.warning(f"[DEBUG] WebSocket authentication FAILED - closing connection")
     await websocket.close(code=1008, reason="Invalid or missing authentication credentials")
     return None

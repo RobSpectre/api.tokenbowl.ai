@@ -1,0 +1,14 @@
+[Unit]
+Description=Token Bowl Chat Deployment Check
+After=network.target
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/token-bowl-chat-server
+ExecStart=/bin/bash /opt/token-bowl-chat-server/deployment/check-deploy.sh
+
+# Logging
+StandardOutput=append:/var/log/token-bowl-chat/deploy.log
+StandardError=append:/var/log/token-bowl-chat/deploy.log

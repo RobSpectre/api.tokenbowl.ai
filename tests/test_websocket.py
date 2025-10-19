@@ -2,9 +2,11 @@
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+from fastapi.testclient import TestClient
 
 from token_bowl_chat_server.models import Message, MessageType, User
 from token_bowl_chat_server.websocket import ConnectionManager, websocket_auth
+from token_bowl_chat_server.storage import storage
 
 
 @pytest.fixture
@@ -420,3 +422,84 @@ async def test_send_notification_error(manager):
     assert result is False
     # User should be disconnected after error
     assert "test_user" not in manager.active_connections
+
+
+def test_websocket_message_persists_to_database(client: TestClient, registered_user: dict) -> None:
+    """Test that messages sent via WebSocket are saved to the database."""
+    # Connect to WebSocket
+    with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as websocket:
+        # Send a message via WebSocket
+        test_message_content = "Test message via WebSocket - should persist"
+        websocket.send_json({"content": test_message_content})
+
+        # Receive confirmation
+        response = websocket.receive_json()
+        assert response["type"] == "message_sent"
+        assert response["status"] == "sent"
+        message_id = response["message"]["id"]
+
+        # Close the WebSocket connection
+        websocket.close()
+
+    # Verify the message was saved to database by fetching via REST API
+    rest_response = client.get("/messages", headers={"X-API-Key": registered_user["api_key"]})
+    assert rest_response.status_code == 200
+    data = rest_response.json()
+
+    # Find our message in the results
+    messages = data["messages"]
+    found_message = None
+    for msg in messages:
+        if msg["id"] == message_id:
+            found_message = msg
+            break
+
+    assert found_message is not None, "Message sent via WebSocket was not found in database"
+    assert found_message["content"] == test_message_content
+    assert found_message["from_username"] == registered_user["username"]
+    assert found_message["message_type"] == "room"
+
+
+def test_websocket_direct_message_persists_to_database(
+    client: TestClient, registered_user: dict, registered_user2: dict
+) -> None:
+    """Test that direct messages sent via WebSocket are saved to the database."""
+    # Connect to WebSocket
+    with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as websocket:
+        # Send a direct message via WebSocket
+        test_message_content = "Direct message via WebSocket - should persist"
+        websocket.send_json({
+            "content": test_message_content,
+            "to_username": registered_user2["username"],
+        })
+
+        # Receive confirmation
+        response = websocket.receive_json()
+        assert response["type"] == "message_sent"
+        assert response["status"] == "sent"
+        message_id = response["message"]["id"]
+
+        # Close the WebSocket connection
+        websocket.close()
+
+    # Verify the message was saved to database
+    # The recipient should be able to fetch it via REST API
+    rest_response = client.get(
+        "/messages/direct", headers={"X-API-Key": registered_user2["api_key"]}
+    )
+    assert rest_response.status_code == 200
+    data = rest_response.json()
+
+    # Find our message in the results
+    messages = data["messages"]
+    found_message = None
+    for msg in messages:
+        if msg["id"] == message_id:
+            found_message = msg
+            break
+
+    assert found_message is not None, "Direct message sent via WebSocket was not found in database"
+    assert found_message["content"] == test_message_content
+    assert found_message["from_username"] == registered_user["username"]
+    assert found_message["to_username"] == registered_user2["username"]
+    assert found_message["message_type"] == "direct"

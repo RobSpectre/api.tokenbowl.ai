@@ -6,22 +6,31 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
 
-from .auth import generate_api_key, get_current_admin, get_current_user
+from .auth import generate_api_key, get_current_admin, get_current_user, require_permission
 from .models import (
     AVAILABLE_LOGOS,
     AdminMessageUpdate,
     AdminUpdateUserRequest,
+    AssignRoleRequest,
+    AssignRoleResponse,
+    BotProfileResponse,
+    CreateBotRequest,
+    CreateBotResponse,
     Message,
     MessageResponse,
     MessageType,
     PaginatedMessagesResponse,
     PaginationMetadata,
+    Permission,
+    PublicUserProfile,
+    Role,
     SendMessageRequest,
     StytchAuthenticateRequest,
     StytchAuthenticateResponse,
     StytchLoginRequest,
     StytchLoginResponse,
     UnreadCountResponse,
+    UpdateBotRequest,
     UpdateLogoRequest,
     UpdateUsernameRequest,
     UpdateWebhookRequest,
@@ -65,14 +74,27 @@ async def register_user(registration: UserRegistration) -> UserRegistrationRespo
     # Generate API key
     api_key = generate_api_key()
 
+    # Determine role from registration data
+    role = registration.get_role()
+
+    # Prevent bot creation via /register - bots must be created via /bots endpoint
+    if role == Role.BOT:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Bots cannot be created via /register. Please use POST /bots to create bots.",
+        )
+
     # Create user
     user = User(
         username=registration.username,
         api_key=api_key,
         webhook_url=registration.webhook_url,
         logo=registration.logo,
+        role=role,
         viewer=registration.viewer,
         admin=registration.admin,
+        bot=registration.bot,
+        emoji=registration.emoji,
     )
 
     try:
@@ -83,15 +105,18 @@ async def register_user(registration: UserRegistration) -> UserRegistrationRespo
             detail=str(e),
         )
 
-    logger.info(f"Registered new user: {user.username}")
+    logger.info(f"Registered new user {user.username} with role {role.value}")
 
     return UserRegistrationResponse(
         username=user.username,
         api_key=api_key,
+        role=role,
         webhook_url=user.webhook_url,
         logo=user.logo,
         viewer=user.viewer,
         admin=user.admin,
+        bot=user.bot,
+        emoji=user.emoji,
     )
 
 
@@ -229,6 +254,20 @@ async def send_message(
     # Determine message type
     message_type = MessageType.DIRECT if message_request.to_username else MessageType.ROOM
 
+    # Check permissions for message type
+    if message_type == MessageType.ROOM:
+        if not current_user.has_permission(Permission.SEND_ROOM_MESSAGE):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Your role '{current_user.role.value}' does not have permission to send room messages",
+            )
+    else:
+        if not current_user.has_permission(Permission.SEND_DIRECT_MESSAGE):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Your role '{current_user.role.value}' does not have permission to send direct messages",
+            )
+
     # Validate recipient if direct message
     if message_request.to_username:
         recipient = storage.get_user_by_username(message_request.to_username)
@@ -287,7 +326,7 @@ async def send_message(
             if not sent_via_ws and recipient.webhook_url:
                 await webhook_delivery.deliver_message(recipient, message)
 
-    return MessageResponse.from_message(message)
+    return MessageResponse.from_message(message, from_user=current_user)
 
 
 @router.get("/messages", response_model=PaginatedMessagesResponse)
@@ -330,8 +369,18 @@ async def get_messages(
     # Calculate if there are more messages
     has_more = (offset + len(messages)) < total
 
+    # Fetch user info for all message senders
+    user_cache = {}
+    message_responses = []
+    for msg in messages:
+        if msg.from_username not in user_cache:
+            user_cache[msg.from_username] = storage.get_user_by_username(msg.from_username)
+        message_responses.append(
+            MessageResponse.from_message(msg, from_user=user_cache[msg.from_username])
+        )
+
     return PaginatedMessagesResponse(
-        messages=[MessageResponse.from_message(msg) for msg in messages],
+        messages=message_responses,
         pagination=PaginationMetadata(
             total=total,
             offset=offset,
@@ -383,8 +432,18 @@ async def get_direct_messages(
     # Calculate if there are more messages
     has_more = (offset + len(messages)) < total
 
+    # Fetch user info for all message senders
+    user_cache = {}
+    message_responses = []
+    for msg in messages:
+        if msg.from_username not in user_cache:
+            user_cache[msg.from_username] = storage.get_user_by_username(msg.from_username)
+        message_responses.append(
+            MessageResponse.from_message(msg, from_user=user_cache[msg.from_username])
+        )
+
     return PaginatedMessagesResponse(
-        messages=[MessageResponse.from_message(msg) for msg in messages],
+        messages=message_responses,
         pagination=PaginationMetadata(
             total=total,
             offset=offset,
@@ -411,7 +470,18 @@ async def get_unread_room_messages(
         List of unread room messages
     """
     messages = storage.get_unread_room_messages(current_user.username, limit=limit, offset=offset)
-    return [MessageResponse.from_message(msg) for msg in messages]
+
+    # Fetch user info for all message senders
+    user_cache = {}
+    message_responses = []
+    for msg in messages:
+        if msg.from_username not in user_cache:
+            user_cache[msg.from_username] = storage.get_user_by_username(msg.from_username)
+        message_responses.append(
+            MessageResponse.from_message(msg, from_user=user_cache[msg.from_username])
+        )
+
+    return message_responses
 
 
 @router.get("/messages/direct/unread", response_model=list[MessageResponse])
@@ -431,7 +501,18 @@ async def get_unread_direct_messages(
         List of unread direct messages
     """
     messages = storage.get_unread_direct_messages(current_user.username, limit=limit, offset=offset)
-    return [MessageResponse.from_message(msg) for msg in messages]
+
+    # Fetch user info for all message senders
+    user_cache = {}
+    message_responses = []
+    for msg in messages:
+        if msg.from_username not in user_cache:
+            user_cache[msg.from_username] = storage.get_user_by_username(msg.from_username)
+        message_responses.append(
+            MessageResponse.from_message(msg, from_user=user_cache[msg.from_username])
+        )
+
+    return message_responses
 
 
 @router.get("/messages/unread/count", response_model=UnreadCountResponse)
@@ -497,9 +578,9 @@ async def mark_all_messages_as_read(
     return {"marked_as_read": count}
 
 
-@router.get("/users", response_model=list[str])
-async def get_users(current_user: User = Depends(get_current_user)) -> list[str]:
-    """Get list of all chat users (non-viewer users).
+@router.get("/users", response_model=list[PublicUserProfile])
+async def get_users(current_user: User = Depends(get_current_user)) -> list[PublicUserProfile]:
+    """Get list of all chat users (non-viewer users) with their display info.
 
     Viewer users are excluded from this list as they cannot receive messages.
 
@@ -507,23 +588,48 @@ async def get_users(current_user: User = Depends(get_current_user)) -> list[str]
         current_user: Authenticated user
 
     Returns:
-        List of chat user usernames
+        List of chat user profiles with logos, emojis, and bot status
     """
     users = storage.get_chat_users()
-    return [user.username for user in users]
+    return [
+        PublicUserProfile(
+            username=user.username,
+            role=user.role,
+            logo=user.logo,
+            emoji=user.emoji,
+            bot=user.bot,
+            viewer=user.viewer,
+        )
+        for user in users
+    ]
 
 
-@router.get("/users/online", response_model=list[str])
-async def get_online_users(current_user: User = Depends(get_current_user)) -> list[str]:
-    """Get list of users currently connected via WebSocket.
+@router.get("/users/online", response_model=list[PublicUserProfile])
+async def get_online_users(current_user: User = Depends(get_current_user)) -> list[PublicUserProfile]:
+    """Get list of users currently connected via WebSocket with their display info.
 
     Args:
         current_user: Authenticated user
 
     Returns:
-        List of online usernames
+        List of online user profiles with logos, emojis, and bot status
     """
-    return connection_manager.get_connected_users()
+    online_usernames = connection_manager.get_connected_users()
+    online_users = []
+    for username in online_usernames:
+        user = storage.get_user_by_username(username)
+        if user:
+            online_users.append(
+                PublicUserProfile(
+                    username=user.username,
+                    role=user.role,
+                    logo=user.logo,
+                    emoji=user.emoji,
+                    bot=user.bot,
+                    viewer=user.viewer,
+                )
+            )
+    return online_users
 
 
 @router.get("/logos", response_model=list[str])
@@ -541,7 +647,7 @@ async def get_available_logos() -> list[str]:
 @router.patch("/users/me/logo", response_model=dict[str, str])
 async def update_my_logo(
     request: UpdateLogoRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission(Permission.UPDATE_OWN_PROFILE)),
 ) -> dict[str, str]:
     """Update the current user's logo.
 
@@ -571,7 +677,7 @@ async def update_my_logo(
 @router.patch("/users/me/webhook", response_model=dict[str, str])
 async def update_my_webhook(
     request: UpdateWebhookRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission(Permission.UPDATE_OWN_PROFILE)),
 ) -> dict[str, str]:
     """Update the current user's webhook URL.
 
@@ -614,12 +720,15 @@ async def get_my_profile(current_user: User = Depends(get_current_user)) -> User
     """
     return UserProfileResponse(
         username=current_user.username,
+        role=current_user.role,
         email=current_user.email,
         api_key=current_user.api_key,
         webhook_url=current_user.webhook_url,
         logo=current_user.logo,
         viewer=current_user.viewer,
         admin=current_user.admin,
+        bot=current_user.bot,
+        emoji=current_user.emoji,
         created_at=current_user.created_at.isoformat(),
     )
 
@@ -627,7 +736,7 @@ async def get_my_profile(current_user: User = Depends(get_current_user)) -> User
 @router.patch("/users/me/username", response_model=UserProfileResponse)
 async def update_my_username(
     request: UpdateUsernameRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission(Permission.UPDATE_OWN_PROFILE)),
 ) -> UserProfileResponse:
     """Update the current user's username.
 
@@ -661,12 +770,15 @@ async def update_my_username(
 
     return UserProfileResponse(
         username=updated_user.username,
+        role=updated_user.role,
         email=updated_user.email,
         api_key=updated_user.api_key,
         webhook_url=updated_user.webhook_url,
         logo=updated_user.logo,
         viewer=updated_user.viewer,
         admin=updated_user.admin,
+        bot=updated_user.bot,
+        emoji=updated_user.emoji,
         created_at=updated_user.created_at.isoformat(),
     )
 
@@ -708,6 +820,43 @@ async def regenerate_my_api_key(
     }
 
 
+@router.get("/users/{username}", response_model=PublicUserProfile)
+async def get_user_profile(
+    username: str,
+    current_user: User = Depends(get_current_user),
+) -> PublicUserProfile:
+    """Get public profile for a specific user.
+
+    Returns public information (username, logo, emoji, bot, viewer status)
+    without sensitive data (API key, email, webhook URL).
+
+    Args:
+        username: Username to retrieve
+        current_user: Authenticated user
+
+    Returns:
+        Public user profile
+
+    Raises:
+        HTTPException: If user not found
+    """
+    user = storage.get_user_by_username(username)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User {username} not found",
+        )
+
+    return PublicUserProfile(
+        username=user.username,
+        role=user.role,
+        logo=user.logo,
+        emoji=user.emoji,
+        bot=user.bot,
+        viewer=user.viewer,
+    )
+
+
 @router.get("/admin/users", response_model=list[UserProfileResponse])
 async def admin_get_all_users(admin_user: User = Depends(get_current_admin)) -> list[UserProfileResponse]:
     """Admin: Get all users with full profile information.
@@ -722,12 +871,15 @@ async def admin_get_all_users(admin_user: User = Depends(get_current_admin)) -> 
     return [
         UserProfileResponse(
             username=user.username,
+            role=user.role,
             email=user.email,
             api_key=user.api_key,
             webhook_url=user.webhook_url,
             logo=user.logo,
             viewer=user.viewer,
             admin=user.admin,
+            bot=user.bot,
+            emoji=user.emoji,
             created_at=user.created_at.isoformat(),
         )
         for user in users
@@ -760,12 +912,15 @@ async def admin_get_user(
 
     return UserProfileResponse(
         username=user.username,
+        role=user.role,
         email=user.email,
         api_key=user.api_key,
         webhook_url=user.webhook_url,
         logo=user.logo,
         viewer=user.viewer,
         admin=user.admin,
+        bot=user.bot,
+        emoji=user.emoji,
         created_at=user.created_at.isoformat(),
     )
 
@@ -797,7 +952,18 @@ async def admin_update_user(
         logo=update_request.logo,
         viewer=update_request.viewer,
         admin=update_request.admin,
+        bot=update_request.bot,
+        emoji=update_request.emoji,
     )
+
+    # If setting bot=true, clear any existing logo
+    if update_request.bot is True and success:
+        # Get current user to check if they have a logo
+        current_user_data = storage.get_user_by_username(username)
+        if current_user_data and current_user_data.logo:
+            # Clear the logo when setting bot=true
+            storage.update_user_logo(username, None)
+            logger.info(f"Cleared logo for {username} when setting bot=true")
 
     if not success:
         raise HTTPException(
@@ -817,12 +983,15 @@ async def admin_update_user(
 
     return UserProfileResponse(
         username=user.username,
+        role=user.role,
         email=user.email,
         api_key=user.api_key,
         webhook_url=user.webhook_url,
         logo=user.logo,
         viewer=user.viewer,
         admin=user.admin,
+        bot=user.bot,
+        emoji=user.emoji,
         created_at=user.created_at.isoformat(),
     )
 
@@ -875,7 +1044,9 @@ async def admin_get_message(
             detail=f"Message {message_id} not found",
         )
 
-    return MessageResponse.from_message(message)
+    # Fetch sender user info
+    from_user = storage.get_user_by_username(message.from_username)
+    return MessageResponse.from_message(message, from_user=from_user)
 
 
 @router.patch("/admin/messages/{message_id}", response_model=MessageResponse)
@@ -914,7 +1085,9 @@ async def admin_update_message(
 
     logger.info(f"Admin {admin_user.username} updated message {message_id}")
 
-    return MessageResponse.from_message(message)
+    # Fetch sender user info
+    from_user = storage.get_user_by_username(message.from_username)
+    return MessageResponse.from_message(message, from_user=from_user)
 
 
 @router.delete("/admin/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -941,19 +1114,334 @@ async def admin_delete_message(
     logger.info(f"Admin {admin_user.username} deleted message {message_id}")
 
 
+@router.post("/bots", response_model=CreateBotResponse, status_code=status.HTTP_201_CREATED)
+async def create_bot(
+    request: CreateBotRequest,
+    current_user: User = Depends(require_permission(Permission.CREATE_BOT)),
+) -> CreateBotResponse:
+    """Create a new bot (members and admins only).
+
+    Args:
+        request: Bot creation request
+        current_user: Authenticated user creating the bot
+
+    Returns:
+        Created bot information with API key
+
+    Raises:
+        HTTPException: If username already exists
+    """
+    # Check if username already exists
+    if storage.get_user_by_username(request.username):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Username {request.username} already exists",
+        )
+
+    # Generate API key for bot
+    api_key = generate_api_key()
+
+    # Create bot user
+    bot = User(
+        username=request.username,
+        api_key=api_key,
+        role=Role.BOT,
+        created_by=current_user.username,
+        emoji=request.emoji,
+        webhook_url=request.webhook_url,
+    )
+
+    try:
+        storage.add_user(bot)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        )
+
+    logger.info(f"User {current_user.username} created bot {bot.username}")
+
+    return CreateBotResponse(
+        username=bot.username,
+        api_key=api_key,
+        created_by=current_user.username,
+        emoji=bot.emoji,
+        webhook_url=bot.webhook_url,
+    )
+
+
+@router.get("/bots/me", response_model=list[BotProfileResponse])
+async def get_my_bots(
+    current_user: User = Depends(get_current_user),
+) -> list[BotProfileResponse]:
+    """Get all bots created by the current user.
+
+    Args:
+        current_user: Authenticated user
+
+    Returns:
+        List of bots created by this user
+    """
+    bots = storage.get_bots_by_creator(current_user.username)
+
+    return [
+        BotProfileResponse(
+            username=bot.username,
+            api_key=bot.api_key,
+            created_by=bot.created_by or "",  # Should always be set for bots
+            emoji=bot.emoji,
+            webhook_url=bot.webhook_url,
+            created_at=bot.created_at.isoformat(),
+        )
+        for bot in bots
+    ]
+
+
+@router.patch("/bots/{bot_username}", response_model=BotProfileResponse)
+async def update_bot(
+    bot_username: str,
+    request: UpdateBotRequest,
+    current_user: User = Depends(get_current_user),
+) -> BotProfileResponse:
+    """Update a bot's configuration (owner or admin only).
+
+    Args:
+        bot_username: Username of the bot to update
+        request: Update request
+        current_user: Authenticated user
+
+    Returns:
+        Updated bot profile
+
+    Raises:
+        HTTPException: If bot not found or user doesn't own it
+    """
+    # Get the bot
+    bot = storage.get_user_by_username(bot_username)
+    if not bot or bot.role != Role.BOT:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Bot {bot_username} not found",
+        )
+
+    # Check ownership (or admin)
+    is_owner = bot.created_by == current_user.username
+    is_admin = current_user.has_permission(Permission.UPDATE_ANY_BOT)
+
+    if not (is_owner or is_admin):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"You don't have permission to update bot {bot_username}",
+        )
+
+    # Update bot fields
+    if request.emoji is not None:
+        storage.admin_update_user(bot_username, emoji=request.emoji)
+
+    if request.webhook_url is not None:
+        webhook_str = str(request.webhook_url) if request.webhook_url else None
+        storage.update_user_webhook(bot_username, webhook_str)
+
+    # Fetch updated bot
+    updated_bot = storage.get_user_by_username(bot_username)
+    if not updated_bot:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve updated bot",
+        )
+
+    logger.info(f"User {current_user.username} updated bot {bot_username}")
+
+    return BotProfileResponse(
+        username=updated_bot.username,
+        api_key=updated_bot.api_key,
+        created_by=updated_bot.created_by or "",
+        emoji=updated_bot.emoji,
+        webhook_url=updated_bot.webhook_url,
+        created_at=updated_bot.created_at.isoformat(),
+    )
+
+
+@router.delete("/bots/{bot_username}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_bot(
+    bot_username: str,
+    current_user: User = Depends(get_current_user),
+) -> None:
+    """Delete a bot (owner or admin only).
+
+    Args:
+        bot_username: Username of the bot to delete
+        current_user: Authenticated user
+
+    Raises:
+        HTTPException: If bot not found or user doesn't own it
+    """
+    # Get the bot
+    bot = storage.get_user_by_username(bot_username)
+    if not bot or bot.role != Role.BOT:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Bot {bot_username} not found",
+        )
+
+    # Check ownership (or admin)
+    is_owner = bot.created_by == current_user.username
+    is_admin = current_user.has_permission(Permission.DELETE_ANY_BOT)
+
+    if not (is_owner or is_admin):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"You don't have permission to delete bot {bot_username}",
+        )
+
+    # Delete the bot
+    success = storage.delete_user(bot_username)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Bot {bot_username} not found",
+        )
+
+    logger.info(f"User {current_user.username} deleted bot {bot_username}")
+
+
+@router.post("/bots/{bot_username}/regenerate-api-key", response_model=dict[str, str])
+async def regenerate_bot_api_key(
+    bot_username: str,
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    """Regenerate a bot's API key (owner or admin only).
+
+    Args:
+        bot_username: Username of the bot
+        current_user: Authenticated user
+
+    Returns:
+        Success message with new API key
+
+    Raises:
+        HTTPException: If bot not found or user doesn't own it
+    """
+    # Get the bot
+    bot = storage.get_user_by_username(bot_username)
+    if not bot or bot.role != Role.BOT:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Bot {bot_username} not found",
+        )
+
+    # Check ownership (or admin)
+    is_owner = bot.created_by == current_user.username
+    is_admin = current_user.has_permission(Permission.UPDATE_ANY_BOT)
+
+    if not (is_owner or is_admin):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"You don't have permission to regenerate API key for bot {bot_username}",
+        )
+
+    # Generate new API key
+    new_api_key = generate_api_key()
+
+    # Update API key in storage
+    success = storage.update_user_api_key(bot_username, new_api_key)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Bot {bot_username} not found",
+        )
+
+    logger.info(f"User {current_user.username} regenerated API key for bot {bot_username}")
+
+    return {
+        "message": "Bot API key regenerated successfully",
+        "api_key": new_api_key,
+    }
+
+
+@router.patch("/admin/users/{username}/role", response_model=AssignRoleResponse)
+async def assign_user_role(
+    username: str,
+    request: AssignRoleRequest,
+    admin_user: User = Depends(require_permission(Permission.ASSIGN_ROLES)),
+) -> AssignRoleResponse:
+    """Admin: Assign a role to a user.
+
+    Args:
+        username: Username to assign role to
+        request: Role assignment request
+        admin_user: Authenticated admin user with ASSIGN_ROLES permission
+
+    Returns:
+        Role assignment response
+
+    Raises:
+        HTTPException: If user not found
+    """
+    # Verify user exists
+    user = storage.get_user_by_username(username)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User {username} not found",
+        )
+
+    # Update role in database
+    success = storage.update_user_role(username, request.role)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update user role",
+        )
+
+    # Sync role to Stytch if user has Stytch ID
+    if user.stytch_user_id and stytch_client.enabled:
+        try:
+            await stytch_client.set_user_role(user.stytch_user_id, request.role)
+            logger.info(f"Synced role {request.role.value} to Stytch for user {username}")
+        except Exception as e:
+            logger.error(f"Failed to sync role to Stytch for user {username}: {e}")
+            # Don't fail the request if Stytch sync fails - database is source of truth
+
+    logger.info(f"Admin {admin_user.username} assigned role {request.role.value} to user {username}")
+
+    return AssignRoleResponse(
+        username=username,
+        role=request.role,
+        message=f"Successfully assigned role '{request.role.value}' to user {username}",
+    )
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
-    """WebSocket endpoint for real-time messaging and read receipts.
+    """WebSocket endpoint for real-time messaging, read receipts, and data queries.
 
     Connect with API key as query parameter: /ws?api_key=YOUR_API_KEY
     Or send API key in X-API-Key header
 
     Supported message types:
+
+    Messaging:
     - Send message: {"type": "message", "content": "...", "to_username": "..."}
       or {"content": "...", "to_username": "..."} (backward compatible)
+
+    Read Receipts:
     - Mark as read: {"type": "mark_read", "message_id": "..."}
     - Mark all as read: {"type": "mark_all_read"}
+    - Mark room read: {"type": "mark_room_read"}
+    - Mark direct read: {"type": "mark_direct_read", "from_username": "..."}
     - Get unread count: {"type": "get_unread_count"}
+
+    Message History:
+    - Get room messages: {"type": "get_messages", "limit": 50, "offset": 0, "since": "ISO-timestamp"}
+    - Get direct messages: {"type": "get_direct_messages", "limit": 50, "offset": 0, "since": "ISO-timestamp"}
+    - Get unread room messages: {"type": "get_unread_messages", "limit": 50, "offset": 0}
+    - Get unread direct messages: {"type": "get_unread_direct_messages", "limit": 50, "offset": 0}
+
+    User Discovery:
+    - Get all users: {"type": "get_users"}
+    - Get online users: {"type": "get_online_users"}
+    - Get user profile: {"type": "get_user_profile", "username": "..."}
 
     Args:
         websocket: WebSocket connection
@@ -962,6 +1450,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     if not user:
         return
 
+    logger.info(f"[DEBUG] WebSocket connection established for user: {user.username}")
     await connection_manager.connect(websocket, user)
 
     try:
@@ -1001,13 +1490,36 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
                 # Create and store message
                 message_type = MessageType.DIRECT if to_username else MessageType.ROOM
+
+                # Check permissions for message type
+                if message_type == MessageType.ROOM:
+                    if not user.has_permission(Permission.SEND_ROOM_MESSAGE):
+                        await websocket.send_json(
+                            {
+                                "type": "error",
+                                "error": f"Your role '{user.role.value}' does not have permission to send room messages",
+                            }
+                        )
+                        continue
+                else:
+                    if not user.has_permission(Permission.SEND_DIRECT_MESSAGE):
+                        await websocket.send_json(
+                            {
+                                "type": "error",
+                                "error": f"Your role '{user.role.value}' does not have permission to send direct messages",
+                            }
+                        )
+                        continue
+
                 message = Message(
                     from_username=user.username,
                     to_username=to_username,
                     content=content,
                     message_type=message_type,
                 )
+                logger.info(f"[DEBUG] About to save WebSocket message from {user.username}: {content[:50]}...")
                 storage.add_message(message)
+                logger.info(f"[DEBUG] Message saved successfully! ID: {message.id}")
 
                 logger.info(
                     f"WebSocket message from {user.username} to "
@@ -1048,7 +1560,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     {
                         "type": "message_sent",
                         "status": "sent",
-                        "message": MessageResponse.from_message(message).model_dump(),
+                        "message": MessageResponse.from_message(message, from_user=user).model_dump(),
                     }
                 )
 
@@ -1112,6 +1624,273 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         "unread_room_messages": unread_room,
                         "unread_direct_messages": unread_direct,
                         "total_unread": total_unread,
+                    }
+                )
+
+            elif msg_type == "mark_room_read":
+                # Mark all room messages as read
+                unread_messages = storage.get_unread_room_messages(user.username)
+                count = 0
+                for msg in unread_messages:
+                    storage.mark_message_as_read(str(msg.id), user.username)
+                    count += 1
+
+                logger.info(f"User {user.username} marked {count} room messages as read via WebSocket")
+
+                await websocket.send_json(
+                    {"status": "marked_read", "count": count}
+                )
+
+            elif msg_type == "mark_direct_read":
+                # Mark all direct messages from a specific user as read
+                from_username = data.get("from_username")
+
+                if not from_username:
+                    await websocket.send_json(
+                        {"type": "error", "error": "Missing from_username field"}
+                    )
+                    continue
+
+                # Get all direct messages between current user and the specified user
+                all_direct_messages = storage.get_direct_messages(user.username)
+                count = 0
+                for msg in all_direct_messages:
+                    # Mark as read if it's from the specified user
+                    if msg.from_username == from_username:
+                        storage.mark_message_as_read(str(msg.id), user.username)
+                        count += 1
+
+                logger.info(
+                    f"User {user.username} marked {count} direct messages from {from_username} as read via WebSocket"
+                )
+
+                await websocket.send_json(
+                    {"status": "marked_read", "from_username": from_username, "count": count}
+                )
+
+            elif msg_type == "get_messages":
+                # Get room message history with pagination
+                limit = data.get("limit", 50)
+                offset = data.get("offset", 0)
+                since = data.get("since")
+
+                # Parse since timestamp if provided
+                since_dt = None
+                if since:
+                    try:
+                        since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+                    except ValueError:
+                        await websocket.send_json(
+                            {"type": "error", "error": "Invalid timestamp format. Use ISO 8601 format."}
+                        )
+                        continue
+
+                # Get total count for pagination
+                total = storage.get_room_messages_count(since=since_dt)
+
+                # Get messages with pagination
+                messages = storage.get_recent_messages(limit=limit, offset=offset, since=since_dt)
+
+                # Calculate if there are more messages
+                has_more = (offset + len(messages)) < total
+
+                # Fetch user info for all message senders
+                user_cache = {}
+                message_responses = []
+                for msg in messages:
+                    if msg.from_username not in user_cache:
+                        user_cache[msg.from_username] = storage.get_user_by_username(msg.from_username)
+                    message_responses.append(
+                        MessageResponse.from_message(msg, from_user=user_cache[msg.from_username]).model_dump()
+                    )
+
+                await websocket.send_json(
+                    {
+                        "type": "messages",
+                        "messages": message_responses,
+                        "pagination": {
+                            "total": total,
+                            "offset": offset,
+                            "limit": limit,
+                            "has_more": has_more,
+                        },
+                    }
+                )
+
+            elif msg_type == "get_direct_messages":
+                # Get direct message history with pagination
+                limit = data.get("limit", 50)
+                offset = data.get("offset", 0)
+                since = data.get("since")
+
+                # Parse since timestamp if provided
+                since_dt = None
+                if since:
+                    try:
+                        since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+                    except ValueError:
+                        await websocket.send_json(
+                            {"type": "error", "error": "Invalid timestamp format. Use ISO 8601 format."}
+                        )
+                        continue
+
+                # Get total count for pagination
+                total = storage.get_direct_messages_count(user.username, since=since_dt)
+
+                # Get messages with pagination
+                messages = storage.get_direct_messages(
+                    user.username, limit=limit, offset=offset, since=since_dt
+                )
+
+                # Calculate if there are more messages
+                has_more = (offset + len(messages)) < total
+
+                # Fetch user info for all message senders
+                user_cache = {}
+                message_responses = []
+                for msg in messages:
+                    if msg.from_username not in user_cache:
+                        user_cache[msg.from_username] = storage.get_user_by_username(msg.from_username)
+                    message_responses.append(
+                        MessageResponse.from_message(msg, from_user=user_cache[msg.from_username]).model_dump()
+                    )
+
+                await websocket.send_json(
+                    {
+                        "type": "direct_messages",
+                        "messages": message_responses,
+                        "pagination": {
+                            "total": total,
+                            "offset": offset,
+                            "limit": limit,
+                            "has_more": has_more,
+                        },
+                    }
+                )
+
+            elif msg_type == "get_unread_messages":
+                # Get unread room messages
+                limit = data.get("limit", 50)
+                offset = data.get("offset", 0)
+
+                messages = storage.get_unread_room_messages(user.username, limit=limit, offset=offset)
+
+                # Fetch user info for all message senders
+                user_cache = {}
+                message_responses = []
+                for msg in messages:
+                    if msg.from_username not in user_cache:
+                        user_cache[msg.from_username] = storage.get_user_by_username(msg.from_username)
+                    message_responses.append(
+                        MessageResponse.from_message(msg, from_user=user_cache[msg.from_username]).model_dump()
+                    )
+
+                await websocket.send_json(
+                    {
+                        "type": "unread_messages",
+                        "messages": message_responses,
+                    }
+                )
+
+            elif msg_type == "get_unread_direct_messages":
+                # Get unread direct messages
+                limit = data.get("limit", 50)
+                offset = data.get("offset", 0)
+
+                messages = storage.get_unread_direct_messages(user.username, limit=limit, offset=offset)
+
+                # Fetch user info for all message senders
+                user_cache = {}
+                message_responses = []
+                for msg in messages:
+                    if msg.from_username not in user_cache:
+                        user_cache[msg.from_username] = storage.get_user_by_username(msg.from_username)
+                    message_responses.append(
+                        MessageResponse.from_message(msg, from_user=user_cache[msg.from_username]).model_dump()
+                    )
+
+                await websocket.send_json(
+                    {
+                        "type": "unread_direct_messages",
+                        "messages": message_responses,
+                    }
+                )
+
+            elif msg_type == "get_users":
+                # Get all chat users
+                users = storage.get_chat_users()
+                user_profiles = [
+                    {
+                        "username": u.username,
+                        "role": u.role.value,
+                        "logo": u.logo,
+                        "emoji": u.emoji,
+                        "bot": u.bot,
+                        "viewer": u.viewer,
+                    }
+                    for u in users
+                ]
+
+                await websocket.send_json(
+                    {
+                        "type": "users",
+                        "users": user_profiles,
+                    }
+                )
+
+            elif msg_type == "get_online_users":
+                # Get online users
+                online_usernames = connection_manager.get_connected_users()
+                online_users = []
+                for username in online_usernames:
+                    u = storage.get_user_by_username(username)
+                    if u:
+                        online_users.append(
+                            {
+                                "username": u.username,
+                                "role": u.role.value,
+                                "logo": u.logo,
+                                "emoji": u.emoji,
+                                "bot": u.bot,
+                                "viewer": u.viewer,
+                            }
+                        )
+
+                await websocket.send_json(
+                    {
+                        "type": "online_users",
+                        "users": online_users,
+                    }
+                )
+
+            elif msg_type == "get_user_profile":
+                # Get user profile
+                username = data.get("username")
+
+                if not username:
+                    await websocket.send_json(
+                        {"type": "error", "error": "Missing username field"}
+                    )
+                    continue
+
+                u = storage.get_user_by_username(username)
+                if not u:
+                    await websocket.send_json(
+                        {"type": "error", "error": f"User {username} not found"}
+                    )
+                    continue
+
+                await websocket.send_json(
+                    {
+                        "type": "user_profile",
+                        "user": {
+                            "username": u.username,
+                            "role": u.role.value,
+                            "logo": u.logo,
+                            "emoji": u.emoji,
+                            "bot": u.bot,
+                            "viewer": u.viewer,
+                        },
                     }
                 )
 

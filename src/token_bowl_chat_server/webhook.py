@@ -53,7 +53,10 @@ class WebhookDelivery:
             logger.error("Webhook client not initialized")
             return False
 
-        message_data = MessageResponse.from_message(message).model_dump()
+        # Fetch sender user info for display
+        from .storage import storage
+        from_user = storage.get_user_by_username(message.from_username)
+        message_data = MessageResponse.from_message(message, from_user=from_user).model_dump()
 
         for attempt in range(self.max_retries):
             try:

@@ -42,11 +42,12 @@ def test_viewers_not_in_users_list(client, registered_user):
     response = client.get("/users", headers=headers)
     assert response.status_code == 200
     users = response.json()
+    usernames = [user["username"] for user in users]
 
     # Viewer should not be in the list
-    assert "viewer_user" not in users
+    assert "viewer_user" not in usernames
     # Regular user should be in the list
-    assert registered_user["username"] in users
+    assert registered_user["username"] in usernames
 
 
 def test_cannot_send_direct_message_to_viewer(client, registered_user):
@@ -96,8 +97,8 @@ def test_viewer_can_view_messages(client, registered_user):
     assert any(msg["content"] == "Test message" for msg in data["messages"])
 
 
-def test_viewer_can_send_messages(client):
-    """Test that viewers can send messages to the room."""
+def test_viewer_cannot_send_messages(client):
+    """Test that viewers cannot send messages (read-only access)."""
     # Register a viewer
     response = client.post(
         "/register",
@@ -106,16 +107,14 @@ def test_viewer_can_send_messages(client):
     viewer_api_key = response.json()["api_key"]
     viewer_headers = {"X-API-Key": viewer_api_key}
 
-    # Viewer sends a message
+    # Viewer attempts to send a message (should be forbidden)
     response = client.post(
         "/messages",
         json={"content": "Viewer observation"},
         headers=viewer_headers,
     )
-    assert response.status_code == 201
-    data = response.json()
-    assert data["content"] == "Viewer observation"
-    assert data["from_username"] == "viewer_user"
+    assert response.status_code == 403
+    assert "does not have permission to send room messages" in response.json()["detail"]
 
 
 def test_websocket_cannot_send_to_viewer(client, registered_user):
@@ -159,15 +158,16 @@ def test_multiple_viewers_not_in_users_list(client, registered_user):
     response = client.get("/users", headers=headers)
     assert response.status_code == 200
     users = response.json()
+    usernames = [user["username"] for user in users]
 
     # No viewers should be in the list
-    assert "viewer_0" not in users
-    assert "viewer_1" not in users
-    assert "viewer_2" not in users
+    assert "viewer_0" not in usernames
+    assert "viewer_1" not in usernames
+    assert "viewer_2" not in usernames
 
     # Regular users should be in the list
-    assert registered_user["username"] in users
-    assert "regular_user" in users
+    assert registered_user["username"] in usernames
+    assert "regular_user" in usernames
 
 
 def test_viewer_with_logo(client):

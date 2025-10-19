@@ -11,7 +11,7 @@ from alembic import command
 from alembic.config import Config
 from pydantic import HttpUrl
 
-from .models import Message, MessageType, User
+from .models import Message, MessageType, Role, User
 
 
 class ChatStorage:
@@ -53,8 +53,12 @@ class ChatStorage:
                         email TEXT,
                         webhook_url TEXT,
                         logo TEXT,
+                        role TEXT NOT NULL DEFAULT 'member',
+                        created_by TEXT,
                         viewer INTEGER NOT NULL DEFAULT 0,
                         admin INTEGER NOT NULL DEFAULT 0,
+                        bot INTEGER NOT NULL DEFAULT 0,
+                        emoji TEXT,
                         created_at TEXT NOT NULL
                     )
                 """)
@@ -172,8 +176,8 @@ class ChatStorage:
             # Insert user
             cursor.execute(
                 """
-                INSERT INTO users (username, api_key, stytch_user_id, email, webhook_url, logo, viewer, admin, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO users (username, api_key, stytch_user_id, email, webhook_url, logo, role, created_by, viewer, admin, bot, emoji, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user.username,
@@ -182,8 +186,12 @@ class ChatStorage:
                     user.email,
                     str(user.webhook_url) if user.webhook_url else None,
                     user.logo,
+                    user.role.value,
+                    user.created_by,
                     1 if user.viewer else 0,
                     1 if user.admin else 0,
+                    1 if user.bot else 0,
+                    user.emoji,
                     user.created_at.isoformat(),
                 ),
             )
@@ -213,8 +221,12 @@ class ChatStorage:
                 email=row["email"],
                 webhook_url=HttpUrl(row["webhook_url"]) if row["webhook_url"] else None,
                 logo=row["logo"],
+                role=Role(row["role"]) if "role" in row.keys() else Role.MEMBER,
+                created_by=row["created_by"] if "created_by" in row.keys() else None,
                 viewer=bool(row["viewer"]),
                 admin=bool(row["admin"]),
+                bot=bool(row["bot"] if "bot" in row.keys() else 0),
+                emoji=row["emoji"] if "emoji" in row.keys() else None,
                 created_at=datetime.fromisoformat(row["created_at"]),
             )
 
@@ -242,8 +254,12 @@ class ChatStorage:
                 email=row["email"],
                 webhook_url=HttpUrl(row["webhook_url"]) if row["webhook_url"] else None,
                 logo=row["logo"],
+                role=Role(row["role"]) if "role" in row.keys() else Role.MEMBER,
+                created_by=row["created_by"] if "created_by" in row.keys() else None,
                 viewer=bool(row["viewer"]),
                 admin=bool(row["admin"]),
+                bot=bool(row["bot"] if "bot" in row.keys() else 0),
+                emoji=row["emoji"] if "emoji" in row.keys() else None,
                 created_at=datetime.fromisoformat(row["created_at"]),
             )
 
@@ -271,8 +287,12 @@ class ChatStorage:
                 email=row["email"],
                 webhook_url=HttpUrl(row["webhook_url"]) if row["webhook_url"] else None,
                 logo=row["logo"],
+                role=Role(row["role"]) if "role" in row.keys() else Role.MEMBER,
+                created_by=row["created_by"] if "created_by" in row.keys() else None,
                 viewer=bool(row["viewer"]),
                 admin=bool(row["admin"]),
+                bot=bool(row["bot"] if "bot" in row.keys() else 0),
+                emoji=row["emoji"] if "emoji" in row.keys() else None,
                 created_at=datetime.fromisoformat(row["created_at"]),
             )
 
@@ -321,6 +341,39 @@ class ChatStorage:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("UPDATE users SET api_key = ? WHERE username = ?", (new_api_key, username))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def update_user_role(self, username: str, role: Role) -> bool:
+        """Update a user's role.
+
+        Args:
+            username: Username to update
+            role: New role
+
+        Returns:
+            True if user was updated, False if not found
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            # Update role and sync legacy fields
+            cursor.execute(
+                """
+                UPDATE users
+                SET role = ?,
+                    admin = ?,
+                    viewer = ?,
+                    bot = ?
+                WHERE username = ?
+                """,
+                (
+                    role.value,
+                    1 if role == Role.ADMIN else 0,
+                    1 if role == Role.VIEWER else 0,
+                    1 if role == Role.BOT else 0,
+                    username,
+                ),
+            )
             conn.commit()
             return cursor.rowcount > 0
 
@@ -537,8 +590,12 @@ class ChatStorage:
                     email=row["email"],
                     webhook_url=HttpUrl(row["webhook_url"]) if row["webhook_url"] else None,
                     logo=row["logo"],
+                    role=Role(row["role"]) if "role" in row.keys() else Role.MEMBER,
+                    created_by=row["created_by"] if "created_by" in row.keys() else None,
                     viewer=bool(row["viewer"]),
                     admin=bool(row["admin"]),
+                    bot=bool(row["bot"] if "bot" in row.keys() else 0),
+                    emoji=row["emoji"] if "emoji" in row.keys() else None,
                     created_at=datetime.fromisoformat(row["created_at"]),
                 )
                 for row in rows
@@ -563,8 +620,48 @@ class ChatStorage:
                     email=row["email"],
                     webhook_url=HttpUrl(row["webhook_url"]) if row["webhook_url"] else None,
                     logo=row["logo"],
+                    role=Role(row["role"]) if "role" in row.keys() else Role.MEMBER,
+                    created_by=row["created_by"] if "created_by" in row.keys() else None,
                     viewer=bool(row["viewer"]),
                     admin=bool(row["admin"]),
+                    bot=bool(row["bot"] if "bot" in row.keys() else 0),
+                    emoji=row["emoji"] if "emoji" in row.keys() else None,
+                    created_at=datetime.fromisoformat(row["created_at"]),
+                )
+                for row in rows
+            ]
+
+    def get_bots_by_creator(self, creator_username: str) -> list[User]:
+        """Get all bots created by a specific user.
+
+        Args:
+            creator_username: Username of the creator
+
+        Returns:
+            List of bots created by this user
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM users WHERE role = 'bot' AND created_by = ? ORDER BY created_at ASC",
+                (creator_username,),
+            )
+            rows = cursor.fetchall()
+
+            return [
+                User(
+                    username=row["username"],
+                    api_key=row["api_key"],
+                    stytch_user_id=row["stytch_user_id"],
+                    email=row["email"],
+                    webhook_url=HttpUrl(row["webhook_url"]) if row["webhook_url"] else None,
+                    logo=row["logo"],
+                    role=Role(row["role"]) if "role" in row.keys() else Role.MEMBER,
+                    created_by=row["created_by"] if "created_by" in row.keys() else None,
+                    viewer=bool(row["viewer"]),
+                    admin=bool(row["admin"]),
+                    bot=bool(row["bot"] if "bot" in row.keys() else 0),
+                    emoji=row["emoji"] if "emoji" in row.keys() else None,
                     created_at=datetime.fromisoformat(row["created_at"]),
                 )
                 for row in rows
@@ -591,8 +688,11 @@ class ChatStorage:
         email: Optional[str] = None,
         webhook_url: Optional[str] = None,
         logo: Optional[str] = None,
+        role: Optional[Role] = None,
         viewer: Optional[bool] = None,
         admin: Optional[bool] = None,
+        bot: Optional[bool] = None,
+        emoji: Optional[str] = None,
     ) -> bool:
         """Admin-only: Update any user's profile fields.
 
@@ -601,8 +701,11 @@ class ChatStorage:
             email: New email (or None to skip)
             webhook_url: New webhook URL (or None to skip)
             logo: New logo (or None to skip)
-            viewer: New viewer status (or None to skip)
-            admin: New admin status (or None to skip)
+            role: New role (or None to skip)
+            viewer: New viewer status (or None to skip) - DEPRECATED, use role instead
+            admin: New admin status (or None to skip) - DEPRECATED, use role instead
+            bot: New bot status (or None to skip) - DEPRECATED, use role instead
+            emoji: New emoji (or None to skip)
 
         Returns:
             True if user was updated, False if not found
@@ -623,12 +726,39 @@ class ChatStorage:
             if logo is not None:
                 updates.append("logo = ?")
                 params.append(logo)
-            if viewer is not None:
-                updates.append("viewer = ?")
-                params.append(1 if viewer else 0)
-            if admin is not None:
+            if role is not None:
+                # Update role and sync legacy fields
+                updates.append("role = ?")
+                params.append(role.value)
                 updates.append("admin = ?")
-                params.append(1 if admin else 0)
+                params.append(1 if role == Role.ADMIN else 0)
+                updates.append("viewer = ?")
+                params.append(1 if role == Role.VIEWER else 0)
+                updates.append("bot = ?")
+                params.append(1 if role == Role.BOT else 0)
+            else:
+                # Legacy support - update role based on boolean fields if provided
+                if viewer is not None:
+                    updates.append("viewer = ?")
+                    params.append(1 if viewer else 0)
+                    if viewer:
+                        updates.append("role = ?")
+                        params.append(Role.VIEWER.value)
+                if admin is not None:
+                    updates.append("admin = ?")
+                    params.append(1 if admin else 0)
+                    if admin:
+                        updates.append("role = ?")
+                        params.append(Role.ADMIN.value)
+                if bot is not None:
+                    updates.append("bot = ?")
+                    params.append(1 if bot else 0)
+                    if bot:
+                        updates.append("role = ?")
+                        params.append(Role.BOT.value)
+            if emoji is not None:
+                updates.append("emoji = ?")
+                params.append(emoji)
 
             if not updates:
                 return False

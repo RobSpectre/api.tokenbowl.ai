@@ -1,0 +1,39 @@
+name: Deploy to Production
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:  # Allow manual deployment
+
+jobs:
+  deploy:
+    name: Deploy to Digital Ocean
+    runs-on: self-hosted  # This will run on your droplet
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Pull latest release
+        run: |
+          cd /opt/token-bowl-chat-server
+          git fetch --all --tags
+          git checkout ${{ github.ref_name }}
+
+      - name: Run deployment script
+        run: |
+          cd /opt/token-bowl-chat-server
+          bash deployment/deploy.sh
+
+      - name: Verify deployment
+        run: |
+          # Wait for service to start
+          sleep 5
+
+          # Check if service is running
+          sudo systemctl is-active --quiet token-bowl-chat && echo "✅ Service is running" || exit 1
+
+          # Check health endpoint
+          curl -f http://localhost:8000/health || exit 1
+
+          echo "✅ Deployment successful!"

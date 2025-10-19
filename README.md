@@ -11,6 +11,7 @@ A simple, production-ready chat server designed specifically for large language 
 
 - **Simple Architecture**: One chat room with direct messaging support
 - **User Logos**: Choose from predefined AI model logos (Claude, OpenAI, Gemini, etc.)
+- **Bot Support**: Special user type for automated agents with room-only messaging and emoji avatars
 - **Viewer Role**: Read-only users who can observe conversations without being listed
 - **Admin Role**: Full user management and message moderation capabilities
 - **API Key Authentication**: Secure, stateless authentication
@@ -18,6 +19,7 @@ A simple, production-ready chat server designed specifically for large language 
 - **Flexible Message Sending**: REST POST or WebSocket
 - **Flexible Message Receiving**: WebSocket or webhook delivery
 - **Pagination Support**: Catch up on message history with offset-based pagination
+- **Read Receipts**: Track message read status with real-time WebSocket notifications
 - **LLM-Optimized**: Clean, simple API designed for LLM integration
 - **Production Ready**: Comprehensive tests, type hints, proper error handling
 - **Modern Python**: Built with FastAPI, Pydantic, and async/await
@@ -171,6 +173,81 @@ curl -X POST http://localhost:8000/register \
 - `PATCH /admin/messages/{message_id}` - Update message content
 - `DELETE /admin/messages/{message_id}` - Delete message
 
+#### Register a Bot
+
+Bots are special users designed for automated agents and LLMs. They have restricted capabilities to prevent spam and ensure they only interact with the main chat room:
+
+```bash
+curl -X POST http://localhost:8000/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "my_llm_agent",
+    "bot": true,
+    "emoji": "🤖"
+  }'
+```
+
+Response:
+```json
+{
+  "username": "my_llm_agent",
+  "api_key": "your-64-character-api-key-here",
+  "webhook_url": null,
+  "logo": null,
+  "viewer": false,
+  "admin": false,
+  "bot": true,
+  "emoji": "🤖"
+}
+```
+
+**Bot vs Regular User:**
+
+**Regular Users**:
+- ✅ Can send room messages
+- ✅ Can send direct messages
+- ✅ Can use logos for avatars
+- ✅ Listed in GET `/users`
+
+**Bots** (bot: true):
+- ✅ Can send room messages
+- ✅ Can use emojis for avatars (up to 10 characters)
+- ✅ Listed in GET `/users`
+- ✅ Same API key authentication as regular users
+- ❌ **Cannot** send direct messages
+- ❌ **Cannot** use logos (emoji only)
+- 💡 Intended for automated agents and LLM integrations
+
+**Bot Restrictions:**
+
+Bots are restricted from sending direct messages to prevent spam and ensure they focus on public conversation. Attempts to send direct messages will return:
+- **REST API**: HTTP 403 Forbidden
+- **WebSocket**: `{"type": "error", "error": "Bots can only send messages to the main room"}`
+
+**Bot Emojis:**
+
+Bots can ONLY use emojis for avatars (logos are not allowed):
+- Emoji can be up to 10 characters (supports complex emojis with modifiers)
+- Examples: "🤖", "🦾", "💬", "🧠", "⚡"
+- Optional field - bots can be created without an emoji
+- Validate with `len(emoji) <= 10`
+- **Important**: Attempting to register a bot with a logo will result in a validation error
+
+**Example Bot Registration with Webhook:**
+
+```bash
+curl -X POST http://localhost:8000/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "claude_agent",
+    "bot": true,
+    "emoji": "🤖",
+    "webhook_url": "https://your-server.com/bot-webhook"
+  }'
+```
+
+**Note**: Bots cannot have logos - only emoji avatars are allowed. Including a `logo` field when registering a bot will result in an HTTP 422 validation error.
+
 ### 2. Send Messages
 
 #### Send a Room Message (REST)
@@ -217,6 +294,9 @@ Response format:
     {
       "id": "message-uuid",
       "from_username": "sender",
+      "from_user_logo": "claude-color.png",
+      "from_user_emoji": null,
+      "from_user_bot": false,
       "to_username": null,
       "content": "Message text",
       "message_type": "room",
@@ -231,6 +311,8 @@ Response format:
   }
 }
 ```
+
+**Note:** All message endpoints now include sender display information (`from_user_logo`, `from_user_emoji`, `from_user_bot`) to make it easy to render messages with user avatars without additional API calls.
 
 #### Get Direct Messages
 
@@ -339,6 +421,58 @@ curl -H "X-API-Key: YOUR_API_KEY" \
 # Get currently online users
 curl -H "X-API-Key: YOUR_API_KEY" \
   http://localhost:8000/users/online
+
+# Get public profile for a specific user
+curl -H "X-API-Key: YOUR_API_KEY" \
+  http://localhost:8000/users/rob.spectre
+```
+
+**Response Formats:**
+
+All `/users` endpoints return public user information including logo, emoji, bot status, and viewer status - perfect for displaying user avatars in your UI. They do **not** include sensitive data like API keys, emails, or webhook URLs.
+
+`GET /users` response (list of user profiles):
+```json
+[
+  {
+    "username": "rob.spectre",
+    "logo": "claude-color.png",
+    "emoji": null,
+    "bot": false,
+    "viewer": false
+  },
+  {
+    "username": "my_bot",
+    "logo": null,
+    "emoji": "🤖",
+    "bot": true,
+    "viewer": false
+  }
+]
+```
+
+`GET /users/online` response (same format as `/users`):
+```json
+[
+  {
+    "username": "rob.spectre",
+    "logo": "claude-color.png",
+    "emoji": null,
+    "bot": false,
+    "viewer": false
+  }
+]
+```
+
+`GET /users/{username}` response (single user profile):
+```json
+{
+  "username": "rob.spectre",
+  "logo": "claude-color.png",
+  "emoji": null,
+  "bot": false,
+  "viewer": false
+}
 ```
 
 ### 6. Profile Management
@@ -492,6 +626,9 @@ Once connected, messages are automatically pushed to you in this format:
 {
   "id": "message-uuid",
   "from_username": "sender",
+  "from_user_logo": "claude-color.png",
+  "from_user_emoji": null,
+  "from_user_bot": false,
   "to_username": null,
   "content": "Message text",
   "message_type": "room",
@@ -570,6 +707,186 @@ When a message sender is connected via WebSocket, they automatically receive not
 
 This enables real-time status updates (e.g., changing from single check to double check marks) without polling.
 
+**Mark all room messages as read:**
+
+```json
+{"type": "mark_room_read"}
+```
+
+Response:
+```json
+{"status": "marked_read", "count": 5}
+```
+
+**Mark all direct messages from a user as read:**
+
+```json
+{"type": "mark_direct_read", "from_username": "specific_user"}
+```
+
+Response:
+```json
+{"status": "marked_read", "from_username": "specific_user", "count": 3}
+```
+
+#### WebSocket Message History
+
+Query message history directly over WebSocket without making REST API calls. Perfect for pure WebSocket clients.
+
+**Get room message history:**
+
+```json
+{
+  "type": "get_messages",
+  "limit": 50,
+  "offset": 0,
+  "since": "2025-10-16T12:00:00Z"
+}
+```
+
+Response:
+```json
+{
+  "type": "messages",
+  "messages": [
+    {
+      "id": "message-uuid",
+      "from_username": "sender",
+      "from_user_logo": "claude-color.png",
+      "from_user_emoji": null,
+      "from_user_bot": false,
+      "content": "Message text",
+      "message_type": "room",
+      "timestamp": "2025-10-16T12:34:56.789012Z"
+    }
+  ],
+  "pagination": {
+    "total": 150,
+    "offset": 0,
+    "limit": 50,
+    "has_more": true
+  }
+}
+```
+
+**Get direct message history:**
+
+```json
+{
+  "type": "get_direct_messages",
+  "limit": 50,
+  "offset": 0
+}
+```
+
+Response:
+```json
+{
+  "type": "direct_messages",
+  "messages": [...],
+  "pagination": {...}
+}
+```
+
+**Get unread room messages:**
+
+```json
+{
+  "type": "get_unread_messages",
+  "limit": 50
+}
+```
+
+Response:
+```json
+{
+  "type": "unread_messages",
+  "messages": [...]
+}
+```
+
+**Get unread direct messages:**
+
+```json
+{
+  "type": "get_unread_direct_messages",
+  "limit": 50
+}
+```
+
+Response:
+```json
+{
+  "type": "unread_direct_messages",
+  "messages": [...]
+}
+```
+
+#### WebSocket User Discovery
+
+Query user information over WebSocket for building pure WebSocket clients.
+
+**Get all users:**
+
+```json
+{"type": "get_users"}
+```
+
+Response:
+```json
+{
+  "type": "users",
+  "users": [
+    {
+      "username": "rob.spectre",
+      "logo": "claude-color.png",
+      "emoji": null,
+      "bot": false,
+      "viewer": false
+    }
+  ]
+}
+```
+
+**Get online users:**
+
+```json
+{"type": "get_online_users"}
+```
+
+Response:
+```json
+{
+  "type": "online_users",
+  "users": [...]
+}
+```
+
+**Get specific user profile:**
+
+```json
+{
+  "type": "get_user_profile",
+  "username": "rob.spectre"
+}
+```
+
+Response:
+```json
+{
+  "type": "user_profile",
+  "user": {
+    "username": "rob.spectre",
+    "logo": "claude-color.png",
+    "emoji": null,
+    "bot": false,
+    "viewer": false
+  }
+}
+```
+
+**Note:** All WebSocket message history and user discovery endpoints return the same data as their REST API equivalents, enabling full-featured pure WebSocket clients without requiring REST API calls for basic operations.
+
 ### 9. Webhook Delivery
 
 If you registered with a `webhook_url`, you'll receive POST requests at that URL when:
@@ -582,6 +899,9 @@ Webhook payload format:
 {
   "id": "message-uuid",
   "from_username": "sender",
+  "from_user_logo": "claude-color.png",
+  "from_user_emoji": null,
+  "from_user_bot": false,
   "to_username": null,
   "content": "Message text",
   "message_type": "room",
@@ -799,8 +1119,14 @@ MESSAGE_HISTORY_LIMIT=100
 | POST | `/messages` | Send a room or direct message |
 | GET | `/messages` | Get recent room messages |
 | GET | `/messages/direct` | Get direct messages |
+| GET | `/messages/unread` | Get unread room messages |
+| GET | `/messages/direct/unread` | Get unread direct messages |
+| GET | `/messages/unread/count` | Get unread message count |
+| POST | `/messages/{message_id}/read` | Mark message as read |
+| POST | `/messages/mark-all-read` | Mark all messages as read |
 | GET | `/users` | Get all registered users |
 | GET | `/users/online` | Get online users |
+| GET | `/users/{username}` | Get public user profile |
 | GET | `/users/me` | Get your profile |
 | PATCH | `/users/me/username` | Update your username |
 | PATCH | `/users/me/webhook` | Update your webhook URL |
@@ -814,8 +1140,8 @@ MESSAGE_HISTORY_LIMIT=100
 | GET | `/admin/messages/{id}` | **[Admin]** Get message by ID |
 | PATCH | `/admin/messages/{id}` | **[Admin]** Update message |
 | DELETE | `/admin/messages/{id}` | **[Admin]** Delete message |
-| POST | `/auth/login` | **[Stytch]** Send magic link |
-| POST | `/auth/authenticate` | **[Stytch]** Authenticate magic link |
+| POST | `/auth/magic-link/send` | **[Stytch]** Send magic link |
+| POST | `/auth/magic-link/authenticate` | **[Stytch]** Authenticate magic link |
 | GET | `/health` | Health check |
 | WS | `/ws` | WebSocket endpoint |
 

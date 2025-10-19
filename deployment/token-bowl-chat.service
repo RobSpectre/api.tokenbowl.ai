@@ -1,0 +1,32 @@
+[Unit]
+Description=Token Bowl Chat Server
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/token-bowl-chat-server
+
+# Environment variables
+Environment="PATH=/opt/token-bowl-chat-server/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+EnvironmentFile=-/opt/token-bowl-chat-server/.env
+
+# Run the application
+ExecStart=/opt/token-bowl-chat-server/.venv/bin/uvicorn token_bowl_chat_server.server:app --host 0.0.0.0 --port 8000
+
+# Restart policy
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=append:/var/log/token-bowl-chat/access.log
+StandardError=append:/var/log/token-bowl-chat/error.log
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

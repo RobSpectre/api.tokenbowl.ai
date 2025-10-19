@@ -676,7 +676,7 @@
     "/users": {
       "get": {
         "summary": "Get Users",
-        "description": "Get list of all chat users (non-viewer users).\n\nViewer users are excluded from this list as they cannot receive messages.\n\nArgs:\n    current_user: Authenticated user\n\nReturns:\n    List of chat user usernames",
+        "description": "Get list of all chat users (non-viewer users) with their display info.\n\nViewer users are excluded from this list as they cannot receive messages.\n\nArgs:\n    current_user: Authenticated user\n\nReturns:\n    List of chat user profiles with logos, emojis, and bot status",
         "operationId": "get_users_users_get",
         "security": [
           {
@@ -709,7 +709,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "type": "string"
+                    "$ref": "#/components/schemas/PublicUserProfile"
                   },
                   "title": "Response Get Users Users Get"
                 }
@@ -732,7 +732,7 @@
     "/users/online": {
       "get": {
         "summary": "Get Online Users",
-        "description": "Get list of users currently connected via WebSocket.\n\nArgs:\n    current_user: Authenticated user\n\nReturns:\n    List of online usernames",
+        "description": "Get list of users currently connected via WebSocket with their display info.\n\nArgs:\n    current_user: Authenticated user\n\nReturns:\n    List of online user profiles with logos, emojis, and bot status",
         "operationId": "get_online_users_users_online_get",
         "security": [
           {
@@ -765,7 +765,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "type": "string"
+                    "$ref": "#/components/schemas/PublicUserProfile"
                   },
                   "title": "Response Get Online Users Users Online Get"
                 }
@@ -1093,6 +1093,67 @@
                     "type": "string"
                   },
                   "title": "Response Regenerate My Api Key Users Me Regenerate Api Key Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{username}": {
+      "get": {
+        "summary": "Get User Profile",
+        "description": "Get public profile for a specific user.\n\nReturns public information (username, logo, emoji, bot, viewer status)\nwithout sensitive data (API key, email, webhook URL).\n\nArgs:\n    username: Username to retrieve\n    current_user: Authenticated user\n\nReturns:\n    Public user profile\n\nRaises:\n    HTTPException: If user not found",
+        "operationId": "get_user_profile_users__username__get",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Username"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicUserProfile"
                 }
               }
             }
@@ -1631,6 +1692,28 @@
               }
             ],
             "title": "Admin"
+          },
+          "bot": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bot"
+          },
+          "emoji": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emoji"
           }
         },
         "type": "object",
@@ -1660,6 +1743,33 @@
             "type": "string",
             "title": "From Username"
           },
+          "from_user_logo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From User Logo"
+          },
+          "from_user_emoji": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From User Emoji"
+          },
+          "from_user_bot": {
+            "type": "boolean",
+            "title": "From User Bot",
+            "default": false
+          },
           "to_username": {
             "anyOf": [
               {
@@ -1687,7 +1797,6 @@
         "required": [
           "id",
           "from_username",
-          "to_username",
           "content",
           "message_type",
           "timestamp"
@@ -1754,6 +1863,52 @@
         ],
         "title": "PaginationMetadata",
         "description": "Pagination metadata for message lists."
+      },
+      "PublicUserProfile": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "logo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Logo"
+          },
+          "emoji": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emoji"
+          },
+          "bot": {
+            "type": "boolean",
+            "title": "Bot",
+            "default": false
+          },
+          "viewer": {
+            "type": "boolean",
+            "title": "Viewer",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "username"
+        ],
+        "title": "PublicUserProfile",
+        "description": "Public user profile (no sensitive information)."
       },
       "SendMessageRequest": {
         "properties": {
@@ -2006,6 +2161,22 @@
             "title": "Admin",
             "default": false
           },
+          "bot": {
+            "type": "boolean",
+            "title": "Bot",
+            "default": false
+          },
+          "emoji": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emoji"
+          },
           "created_at": {
             "type": "string",
             "title": "Created At"
@@ -2062,6 +2233,22 @@
             "type": "boolean",
             "title": "Admin",
             "default": false
+          },
+          "bot": {
+            "type": "boolean",
+            "title": "Bot",
+            "default": false
+          },
+          "emoji": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emoji"
           }
         },
         "type": "object",
@@ -2115,6 +2302,22 @@
             "type": "boolean",
             "title": "Admin",
             "default": false
+          },
+          "bot": {
+            "type": "boolean",
+            "title": "Bot",
+            "default": false
+          },
+          "emoji": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emoji"
           }
         },
         "type": "object",

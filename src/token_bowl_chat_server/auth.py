@@ -1,12 +1,12 @@
 """Authentication utilities for API key and Stytch validation."""
 
 import secrets
-from typing import Optional
+from typing import Callable, Optional
 
-from fastapi import Header, HTTPException, Security, status
+from fastapi import Depends, Header, HTTPException, Security, status
 from fastapi.security import APIKeyHeader
 
-from .models import User
+from .models import Permission, User
 from .storage import storage
 
 # API key header configuration
@@ -86,6 +86,8 @@ def validate_api_key(api_key: Optional[str]) -> Optional[User]:
 async def get_current_admin(current_user: User = Security(get_current_user)) -> User:
     """Validate that current user is an admin.
 
+    DEPRECATED: Use require_permission(Permission.ADMIN_ACCESS) instead.
+
     Args:
         current_user: Authenticated user
 
@@ -95,9 +97,94 @@ async def get_current_admin(current_user: User = Security(get_current_user)) -> 
     Raises:
         HTTPException: If user is not an admin
     """
-    if not current_user.admin:
+    if not current_user.has_permission(Permission.ADMIN_ACCESS):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privileges required",
         )
     return current_user
+
+
+def require_permission(permission: Permission) -> Callable:
+    """Create a dependency that requires a specific permission.
+
+    Usage:
+        @router.delete("/admin/users/{username}")
+        async def delete_user(
+            username: str,
+            user: User = Depends(require_permission(Permission.DELETE_USER))
+        ):
+            # User has DELETE_USER permission
+            ...
+
+    Args:
+        permission: The permission required to access the endpoint
+
+    Returns:
+        A FastAPI dependency function that checks the permission
+    """
+
+    async def permission_checker(current_user: User = Depends(get_current_user)) -> User:
+        """Check if current user has the required permission.
+
+        Args:
+            current_user: Authenticated user
+
+        Returns:
+            User if they have the permission
+
+        Raises:
+            HTTPException: If user lacks the permission
+        """
+        if not current_user.has_permission(permission):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission '{permission.value}' required. Your role '{current_user.role.value}' does not have this permission.",
+            )
+        return current_user
+
+    return permission_checker
+
+
+def require_any_permission(*permissions: Permission) -> Callable:
+    """Create a dependency that requires any one of the specified permissions.
+
+    Usage:
+        @router.get("/messages")
+        async def get_messages(
+            user: User = Depends(require_any_permission(
+                Permission.READ_MESSAGES,
+                Permission.ADMIN_ACCESS
+            ))
+        ):
+            ...
+
+    Args:
+        *permissions: One or more permissions, any of which satisfies the requirement
+
+    Returns:
+        A FastAPI dependency function that checks if user has any of the permissions
+    """
+
+    async def permission_checker(current_user: User = Depends(get_current_user)) -> User:
+        """Check if current user has any of the required permissions.
+
+        Args:
+            current_user: Authenticated user
+
+        Returns:
+            User if they have at least one permission
+
+        Raises:
+            HTTPException: If user lacks all permissions
+        """
+        if any(current_user.has_permission(perm) for perm in permissions):
+            return current_user
+
+        perm_names = ", ".join([p.value for p in permissions])
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"One of these permissions required: {perm_names}. Your role '{current_user.role.value}' does not have any of them.",
+        )
+
+    return permission_checker
