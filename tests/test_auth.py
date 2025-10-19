@@ -5,7 +5,6 @@ from fastapi import HTTPException
 
 from token_bowl_chat_server.auth import generate_api_key, get_current_user, validate_api_key
 from token_bowl_chat_server.models import User
-from token_bowl_chat_server.storage import ChatStorage
 
 
 def test_generate_api_key():

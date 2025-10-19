@@ -1,8 +1,5 @@
 """Configuration settings for the chat server."""
 
-import os
-from typing import Optional
-
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,8 +22,8 @@ class Settings(BaseSettings):
     message_history_limit: int = 100
 
     # Stytch settings
-    stytch_project_id: Optional[str] = None
-    stytch_secret: Optional[str] = None
+    stytch_project_id: str | None = None
+    stytch_secret: str | None = None
     stytch_environment: str = "test"  # 'test' or 'live'
 
     @property

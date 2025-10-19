@@ -1,7 +1,7 @@
 """Authentication utilities for API key and Stytch validation."""
 
 import secrets
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from fastapi import Depends, Header, HTTPException, Security, status
 from fastapi.security import APIKeyHeader
@@ -23,8 +23,8 @@ def generate_api_key() -> str:
 
 
 async def get_current_user(
-    api_key: Optional[str] = Security(api_key_header),
-    authorization: Optional[str] = Header(default=None),
+    api_key: str | None = Security(api_key_header),
+    authorization: str | None = Header(default=None),
 ) -> User:
     """Validate API key or Stytch session token and return current user.
 
@@ -68,7 +68,7 @@ async def get_current_user(
     )
 
 
-def validate_api_key(api_key: Optional[str]) -> Optional[User]:
+def validate_api_key(api_key: str | None) -> User | None:
     """Validate API key without raising exceptions.
 
     Args:

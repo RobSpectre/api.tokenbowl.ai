@@ -31,7 +31,7 @@ def main() -> None:
         },
     )
     registration = response.json()
-    print(f"✓ Registered successfully!")
+    print("✓ Registered successfully!")
     print(f"  Username: {registration['username']}")
     print(f"  API Key: {registration['api_key'][:32]}...")
     print(f"  Logo: {registration.get('logo', 'None')}")
@@ -83,7 +83,7 @@ def main() -> None:
             json={"content": f"Message {i + 1} for pagination demo"},
             headers=headers,
         )
-    print(f"  ✓ Sent 5 additional messages")
+    print("  ✓ Sent 5 additional messages")
 
     # ===== Fetching Messages with Pagination =====
     print("\n" + "=" * 60)
@@ -97,7 +97,7 @@ def main() -> None:
         headers=headers,
     )
     data = response.json()
-    print(f"  Page 1 (limit=3, offset=0):")
+    print("  Page 1 (limit=3, offset=0):")
     print(f"  Total messages: {data['pagination']['total']}")
     print(f"  Has more: {data['pagination']['has_more']}")
     for msg in data["messages"]:
@@ -110,7 +110,7 @@ def main() -> None:
         headers=headers,
     )
     data = response.json()
-    print(f"\n  Page 2 (limit=3, offset=3):")
+    print("\n  Page 2 (limit=3, offset=3):")
     for msg in data["messages"]:
         print(f"    [{msg['from_username']}] {msg['content'][:50]}")
 

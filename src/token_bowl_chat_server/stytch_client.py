@@ -1,7 +1,6 @@
 """Stytch client wrapper for authentication."""
 
 import logging
-from typing import Optional
 
 import stytch
 from stytch.core.response_base import StytchError
@@ -17,7 +16,7 @@ class StytchClient:
 
     def __init__(self) -> None:
         """Initialize Stytch client."""
-        self._client: Optional[stytch.Client] = None
+        self._client: stytch.Client | None = None
 
         if settings.stytch_enabled:
             try:
@@ -108,7 +107,7 @@ class StytchClient:
             logger.error(f"Failed to authenticate magic link: {e}")
             raise
 
-    async def validate_session(self, session_token: str) -> Optional[str]:
+    async def validate_session(self, session_token: str) -> str | None:
         """Validate a Stytch session token.
 
         Args:
@@ -157,7 +156,7 @@ class StytchClient:
             logger.error(f"Failed to update user role in Stytch: {e}")
             raise
 
-    async def get_user_role(self, stytch_user_id: str) -> Optional[Role]:
+    async def get_user_role(self, stytch_user_id: str) -> Role | None:
         """Get a user's role from Stytch trusted_metadata.
 
         Args:

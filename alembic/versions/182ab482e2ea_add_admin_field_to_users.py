@@ -5,13 +5,14 @@ Revises: 369c2ed889c0
 Create Date: 2025-10-17 17:48:32.215230
 
 """
+
 from collections.abc import Sequence
 
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = '182ab482e2ea'
-down_revision: str | Sequence[str] | None = '369c2ed889c0'
+revision: str = "182ab482e2ea"
+down_revision: str | Sequence[str] | None = "369c2ed889c0"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

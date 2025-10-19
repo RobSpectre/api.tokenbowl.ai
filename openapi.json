@@ -1110,11 +1110,11 @@
         }
       }
     },
-    "/users/{username}": {
+    "/users/{user_id}": {
       "get": {
         "summary": "Get User Profile",
-        "description": "Get public profile for a specific user.\n\nReturns public information (username, logo, emoji, bot, viewer status)\nwithout sensitive data (API key, email, webhook URL).\n\nArgs:\n    username: Username to retrieve\n    current_user: Authenticated user\n\nReturns:\n    Public user profile\n\nRaises:\n    HTTPException: If user not found",
-        "operationId": "get_user_profile_users__username__get",
+        "description": "Get public profile for a specific user.\n\nReturns public information (username, logo, emoji, bot, viewer status)\nwithout sensitive data (API key, email, webhook URL).\n\nArgs:\n    user_id: User UUID to retrieve\n    current_user: Authenticated user\n\nReturns:\n    Public user profile\n\nRaises:\n    HTTPException: If user not found or invalid UUID",
+        "operationId": "get_user_profile_users__user_id__get",
         "security": [
           {
             "APIKeyHeader": []
@@ -1122,12 +1122,12 @@
         ],
         "parameters": [
           {
-            "name": "username",
+            "name": "user_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Username"
+              "title": "User Id"
             }
           },
           {
@@ -1227,11 +1227,11 @@
         }
       }
     },
-    "/admin/users/{username}": {
+    "/admin/users/{user_id}": {
       "get": {
         "summary": "Admin Get User",
-        "description": "Admin: Get a specific user's full profile.\n\nArgs:\n    username: Username to retrieve\n    admin_user: Authenticated admin user\n\nReturns:\n    User profile\n\nRaises:\n    HTTPException: If user not found",
-        "operationId": "admin_get_user_admin_users__username__get",
+        "description": "Admin: Get a specific user's full profile.\n\nArgs:\n    user_id: User UUID to retrieve\n    admin_user: Authenticated admin user\n\nReturns:\n    User profile\n\nRaises:\n    HTTPException: If user not found or invalid UUID",
+        "operationId": "admin_get_user_admin_users__user_id__get",
         "security": [
           {
             "APIKeyHeader": []
@@ -1239,12 +1239,12 @@
         ],
         "parameters": [
           {
-            "name": "username",
+            "name": "user_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Username"
+              "title": "User Id"
             }
           },
           {
@@ -1289,8 +1289,8 @@
       },
       "patch": {
         "summary": "Admin Update User",
-        "description": "Admin: Update any user's profile fields.\n\nArgs:\n    username: Username to update\n    update_request: Fields to update\n    admin_user: Authenticated admin user\n\nReturns:\n    Updated user profile\n\nRaises:\n    HTTPException: If user not found",
-        "operationId": "admin_update_user_admin_users__username__patch",
+        "description": "Admin: Update any user's profile fields.\n\nArgs:\n    user_id: User UUID to update\n    update_request: Fields to update\n    admin_user: Authenticated admin user\n\nReturns:\n    Updated user profile\n\nRaises:\n    HTTPException: If user not found or invalid UUID",
+        "operationId": "admin_update_user_admin_users__user_id__patch",
         "security": [
           {
             "APIKeyHeader": []
@@ -1298,12 +1298,12 @@
         ],
         "parameters": [
           {
-            "name": "username",
+            "name": "user_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Username"
+              "title": "User Id"
             }
           },
           {
@@ -1358,8 +1358,8 @@
       },
       "delete": {
         "summary": "Admin Delete User",
-        "description": "Admin: Delete a user.\n\nArgs:\n    username: Username to delete\n    admin_user: Authenticated admin user\n\nRaises:\n    HTTPException: If user not found",
-        "operationId": "admin_delete_user_admin_users__username__delete",
+        "description": "Admin: Delete a user.\n\nArgs:\n    user_id: User UUID to delete\n    admin_user: Authenticated admin user\n\nRaises:\n    HTTPException: If user not found or invalid UUID",
+        "operationId": "admin_delete_user_admin_users__user_id__delete",
         "security": [
           {
             "APIKeyHeader": []
@@ -1367,12 +1367,12 @@
         ],
         "parameters": [
           {
-            "name": "username",
+            "name": "user_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Username"
+              "title": "User Id"
             }
           },
           {
@@ -1591,6 +1591,445 @@
         }
       }
     },
+    "/bots": {
+      "post": {
+        "summary": "Create Bot",
+        "description": "Create a new bot (members and admins only).\n\nArgs:\n    request: Bot creation request\n    current_user: Authenticated user creating the bot\n\nReturns:\n    Created bot information with API key\n\nRaises:\n    HTTPException: If username already exists",
+        "operationId": "create_bot_bots_post",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBotRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateBotResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bots/me": {
+      "get": {
+        "summary": "Get My Bots",
+        "description": "Get all bots created by the current user.\n\nArgs:\n    current_user: Authenticated user\n\nReturns:\n    List of bots created by this user",
+        "operationId": "get_my_bots_bots_me_get",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BotProfileResponse"
+                  },
+                  "title": "Response Get My Bots Bots Me Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bots/{bot_id}": {
+      "patch": {
+        "summary": "Update Bot",
+        "description": "Update a bot's configuration (owner or admin only).\n\nArgs:\n    bot_id: Bot UUID to update\n    request: Update request\n    current_user: Authenticated user\n\nReturns:\n    Updated bot profile\n\nRaises:\n    HTTPException: If bot not found, invalid UUID, or user doesn't own it",
+        "operationId": "update_bot_bots__bot_id__patch",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "bot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bot Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBotRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotProfileResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete Bot",
+        "description": "Delete a bot (owner or admin only).\n\nArgs:\n    bot_id: Bot UUID to delete\n    current_user: Authenticated user\n\nRaises:\n    HTTPException: If bot not found, invalid UUID, or user doesn't own it",
+        "operationId": "delete_bot_bots__bot_id__delete",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "bot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bot Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bots/{bot_id}/regenerate-api-key": {
+      "post": {
+        "summary": "Regenerate Bot Api Key",
+        "description": "Regenerate a bot's API key (owner or admin only).\n\nArgs:\n    bot_id: Bot UUID\n    current_user: Authenticated user\n\nReturns:\n    Success message with new API key\n\nRaises:\n    HTTPException: If bot not found, invalid UUID, or user doesn't own it",
+        "operationId": "regenerate_bot_api_key_bots__bot_id__regenerate_api_key_post",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "bot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bot Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Regenerate Bot Api Key Bots  Bot Id  Regenerate Api Key Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/users/{user_id}/role": {
+      "patch": {
+        "summary": "Assign User Role",
+        "description": "Admin: Assign a role to a user.\n\nArgs:\n    user_id: User UUID to assign role to\n    request: Role assignment request\n    admin_user: Authenticated admin user with ASSIGN_ROLES permission\n\nReturns:\n    Role assignment response\n\nRaises:\n    HTTPException: If user not found or invalid UUID",
+        "operationId": "assign_user_role_admin_users__user_id__role_patch",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignRoleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssignRoleResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/invite": {
+      "post": {
+        "summary": "Invite User By Email",
+        "description": "Admin: Invite a user by email using Stytch magic link.\n\nSends a magic link invitation to the specified email address. When the user clicks\nthe link and authenticates, they will be automatically registered with the specified role.\n\nArgs:\n    request: Invite request with email, role, and signup URL\n    admin_user: Authenticated admin user\n\nReturns:\n    Invite response with confirmation\n\nRaises:\n    HTTPException: If Stytch is not enabled or invitation fails",
+        "operationId": "invite_user_by_email_admin_invite_post",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InviteUserRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteUserResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "summary": "Health Check",
@@ -1720,6 +2159,206 @@
         "title": "AdminUpdateUserRequest",
         "description": "Admin request model for updating any user's profile."
       },
+      "AssignRoleRequest": {
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          }
+        },
+        "type": "object",
+        "required": [
+          "role"
+        ],
+        "title": "AssignRoleRequest",
+        "description": "Request model for assigning a role to a user (admin only)."
+      },
+      "AssignRoleResponse": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "role",
+          "message"
+        ],
+        "title": "AssignRoleResponse",
+        "description": "Response model for role assignment."
+      },
+      "BotProfileResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "api_key": {
+            "type": "string",
+            "title": "Api Key"
+          },
+          "created_by_id": {
+            "type": "string",
+            "title": "Created By Id"
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By"
+          },
+          "emoji": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emoji"
+          },
+          "webhook_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2083,
+                "minLength": 1,
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Webhook Url"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "username",
+          "api_key",
+          "created_by_id",
+          "created_by",
+          "created_at"
+        ],
+        "title": "BotProfileResponse",
+        "description": "Response model for bot profile."
+      },
+      "CreateBotRequest": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Username"
+          },
+          "emoji": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emoji"
+          },
+          "webhook_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2083,
+                "minLength": 1,
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Webhook Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username"
+        ],
+        "title": "CreateBotRequest",
+        "description": "Request model for creating a bot."
+      },
+      "CreateBotResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "api_key": {
+            "type": "string",
+            "title": "Api Key"
+          },
+          "created_by_id": {
+            "type": "string",
+            "title": "Created By Id"
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By"
+          },
+          "emoji": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emoji"
+          },
+          "webhook_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2083,
+                "minLength": 1,
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Webhook Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "username",
+          "api_key",
+          "created_by_id",
+          "created_by"
+        ],
+        "title": "CreateBotResponse",
+        "description": "Response model for bot creation."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1733,11 +2372,64 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "InviteUserRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "title": "Email",
+            "description": "Email address to invite"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role",
+            "description": "Role to assign to the invited user",
+            "default": "member"
+          },
+          "signup_url": {
+            "type": "string",
+            "title": "Signup Url",
+            "description": "URL to redirect to after clicking magic link (e.g., https://app.example.com/signup)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "signup_url"
+        ],
+        "title": "InviteUserRequest",
+        "description": "Request to invite a user by email."
+      },
+      "InviteUserResponse": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "role",
+          "message"
+        ],
+        "title": "InviteUserResponse",
+        "description": "Response after sending invitation."
+      },
       "MessageResponse": {
         "properties": {
           "id": {
             "type": "string",
             "title": "Id"
+          },
+          "from_user_id": {
+            "type": "string",
+            "title": "From User Id"
           },
           "from_username": {
             "type": "string",
@@ -1770,6 +2462,17 @@
             "title": "From User Bot",
             "default": false
           },
+          "to_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To User Id"
+          },
           "to_username": {
             "anyOf": [
               {
@@ -1796,6 +2499,7 @@
         "type": "object",
         "required": [
           "id",
+          "from_user_id",
           "from_username",
           "content",
           "message_type",
@@ -1866,9 +2570,16 @@
       },
       "PublicUserProfile": {
         "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
           "username": {
             "type": "string",
             "title": "Username"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
           },
           "logo": {
             "anyOf": [
@@ -1905,10 +2616,23 @@
         },
         "type": "object",
         "required": [
-          "username"
+          "id",
+          "username",
+          "role"
         ],
         "title": "PublicUserProfile",
         "description": "Public user profile (no sensitive information)."
+      },
+      "Role": {
+        "type": "string",
+        "enum": [
+          "admin",
+          "member",
+          "viewer",
+          "bot"
+        ],
+        "title": "Role",
+        "description": "User roles for authorization."
       },
       "SendMessageRequest": {
         "properties": {
@@ -2050,6 +2774,38 @@
         "title": "UnreadCountResponse",
         "description": "Response model for unread message counts."
       },
+      "UpdateBotRequest": {
+        "properties": {
+          "emoji": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emoji"
+          },
+          "webhook_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2083,
+                "minLength": 1,
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Webhook Url"
+          }
+        },
+        "type": "object",
+        "title": "UpdateBotRequest",
+        "description": "Request model for updating a bot."
+      },
       "UpdateLogoRequest": {
         "properties": {
           "logo": {
@@ -2107,9 +2863,16 @@
       },
       "UserProfileResponse": {
         "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
           "username": {
             "type": "string",
             "title": "Username"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
           },
           "email": {
             "anyOf": [
@@ -2184,7 +2947,9 @@
         },
         "type": "object",
         "required": [
+          "id",
           "username",
+          "role",
           "api_key",
           "created_at"
         ],
@@ -2224,6 +2989,16 @@
             ],
             "title": "Logo"
           },
+          "role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Role"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "viewer": {
             "type": "boolean",
             "title": "Viewer",
@@ -2260,6 +3035,10 @@
       },
       "UserRegistrationResponse": {
         "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
           "username": {
             "type": "string",
             "title": "Username"
@@ -2267,6 +3046,9 @@
           "api_key": {
             "type": "string",
             "title": "Api Key"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
           },
           "webhook_url": {
             "anyOf": [
@@ -2322,8 +3104,10 @@
         },
         "type": "object",
         "required": [
+          "id",
           "username",
-          "api_key"
+          "api_key",
+          "role"
         ],
         "title": "UserRegistrationResponse",
         "description": "Response model for user registration."

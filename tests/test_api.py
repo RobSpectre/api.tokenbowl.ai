@@ -1,7 +1,8 @@
 """Tests for API endpoints."""
 
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 
 def test_health_check(client):
@@ -442,9 +443,8 @@ def test_websocket_missing_api_key(client):
     """Test WebSocket connection without API key."""
     from fastapi import WebSocketDisconnect
 
-    with pytest.raises(WebSocketDisconnect):
-        with client.websocket_connect("/ws") as websocket:
-            pass
+    with pytest.raises(WebSocketDisconnect), client.websocket_connect("/ws") as websocket:
+        pass
 
 
 def test_register_user_with_logo(client):
@@ -735,7 +735,7 @@ def test_admin_list_all_users_without_admin(client, registered_user):
 def test_admin_get_user(client, registered_user, registered_admin):
     """Test admin getting a specific user's profile."""
     headers = {"X-API-Key": registered_admin["api_key"]}
-    response = client.get("/admin/users/test_user", headers=headers)
+    response = client.get(f"/admin/users/{registered_user['id']}", headers=headers)
     assert response.status_code == 200
     data = response.json()
     assert data["username"] == "test_user"
@@ -747,7 +747,7 @@ def test_admin_get_user(client, registered_user, registered_admin):
 def test_admin_get_user_not_found(client, registered_admin):
     """Test admin getting a nonexistent user."""
     headers = {"X-API-Key": registered_admin["api_key"]}
-    response = client.get("/admin/users/nonexistent_user", headers=headers)
+    response = client.get("/admin/users/00000000-0000-0000-0000-000000000000", headers=headers)
     assert response.status_code == 404
     assert "not found" in response.json()["detail"]
 
@@ -755,7 +755,7 @@ def test_admin_get_user_not_found(client, registered_admin):
 def test_admin_get_user_without_admin(client, registered_user):
     """Test non-admin user cannot get user details."""
     headers = {"X-API-Key": registered_user["api_key"]}
-    response = client.get("/admin/users/test_user", headers=headers)
+    response = client.get(f"/admin/users/{registered_user['id']}", headers=headers)
     assert response.status_code == 403
 
 
@@ -763,7 +763,7 @@ def test_admin_update_user(client, registered_user, registered_admin):
     """Test admin updating a user's profile."""
     headers = {"X-API-Key": registered_admin["api_key"]}
     response = client.patch(
-        "/admin/users/test_user",
+        f"/admin/users/{registered_user['id']}",
         json={
             "email": "newemail@example.com",
             "webhook_url": "https://example.com/webhook",
@@ -785,7 +785,7 @@ def test_admin_update_user_admin_status(client, registered_user, registered_admi
     """Test admin changing a user's admin status."""
     headers = {"X-API-Key": registered_admin["api_key"]}
     response = client.patch(
-        "/admin/users/test_user",
+        f"/admin/users/{registered_user['id']}",
         json={"admin": True},
         headers=headers,
     )
@@ -798,7 +798,7 @@ def test_admin_update_user_not_found(client, registered_admin):
     """Test admin updating a nonexistent user."""
     headers = {"X-API-Key": registered_admin["api_key"]}
     response = client.patch(
-        "/admin/users/nonexistent_user",
+        "/admin/users/00000000-0000-0000-0000-000000000000",
         json={"email": "test@example.com"},
         headers=headers,
     )
@@ -810,7 +810,7 @@ def test_admin_update_user_without_admin(client, registered_user, registered_use
     """Test non-admin user cannot update other users."""
     headers = {"X-API-Key": registered_user["api_key"]}
     response = client.patch(
-        "/admin/users/test_user2",
+        f"/admin/users/{registered_user2['id']}",
         json={"email": "test@example.com"},
         headers=headers,
     )
@@ -820,25 +820,26 @@ def test_admin_update_user_without_admin(client, registered_user, registered_use
 def test_admin_delete_user(client, registered_user, registered_admin):
     """Test admin deleting a user."""
     headers = {"X-API-Key": registered_admin["api_key"]}
-    response = client.delete("/admin/users/test_user", headers=headers)
+    user_id = registered_user["id"]
+    response = client.delete(f"/admin/users/{user_id}", headers=headers)
     assert response.status_code == 204
 
     # Verify user is deleted
-    response = client.get("/admin/users/test_user", headers=headers)
+    response = client.get(f"/admin/users/{user_id}", headers=headers)
     assert response.status_code == 404
 
 
 def test_admin_delete_user_not_found(client, registered_admin):
     """Test admin deleting a nonexistent user."""
     headers = {"X-API-Key": registered_admin["api_key"]}
-    response = client.delete("/admin/users/nonexistent_user", headers=headers)
+    response = client.delete("/admin/users/00000000-0000-0000-0000-000000000000", headers=headers)
     assert response.status_code == 404
 
 
 def test_admin_delete_user_without_admin(client, registered_user, registered_user2):
     """Test non-admin user cannot delete users."""
     headers = {"X-API-Key": registered_user["api_key"]}
-    response = client.delete("/admin/users/test_user2", headers=headers)
+    response = client.delete(f"/admin/users/{registered_user2['id']}", headers=headers)
     assert response.status_code == 403
 
 
@@ -973,10 +974,10 @@ def test_admin_delete_message_without_admin(client, registered_user):
 def test_get_user_profile(client, registered_user, registered_user2):
     """Test getting a public user profile."""
     headers = {"X-API-Key": registered_user["api_key"]}
-    
+
     # Get the other user's profile
-    response = client.get(f"/users/{registered_user2['username']}", headers=headers)
-    
+    response = client.get(f"/users/{registered_user2['id']}", headers=headers)
+
     assert response.status_code == 200
     data = response.json()
     assert data["username"] == registered_user2["username"]
@@ -984,7 +985,7 @@ def test_get_user_profile(client, registered_user, registered_user2):
     assert "emoji" in data
     assert "bot" in data
     assert "viewer" in data
-    
+
     # Should NOT include sensitive data
     assert "api_key" not in data
     assert "email" not in data
@@ -995,9 +996,9 @@ def test_get_user_profile(client, registered_user, registered_user2):
 def test_get_user_profile_not_found(client, registered_user):
     """Test getting a profile for non-existent user."""
     headers = {"X-API-Key": registered_user["api_key"]}
-    
-    response = client.get("/users/nonexistent_user", headers=headers)
-    
+
+    response = client.get("/users/00000000-0000-0000-0000-000000000000", headers=headers)
+
     assert response.status_code == 404
     assert "not found" in response.json()["detail"].lower()
 
@@ -1014,7 +1015,9 @@ def test_get_user_profile_with_logo_and_emoji(client, registered_user):
         headers={"X-API-Key": registered_user["api_key"]},
     )
     assert bot_response.status_code == 201
-    bot_api_key = bot_response.json()["api_key"]
+    bot_data = bot_response.json()
+    bot_api_key = bot_data["api_key"]
+    bot_id = bot_data["id"]
 
     # Register a regular user with logo
     user_response = client.post(
@@ -1024,11 +1027,13 @@ def test_get_user_profile_with_logo_and_emoji(client, registered_user):
             "logo": "openai.png",
         },
     )
-    user_api_key = user_response.json()["api_key"]
+    user_data = user_response.json()
+    user_api_key = user_data["api_key"]
+    user_id = user_data["id"]
 
     # Bot gets user profile
     response = client.get(
-        "/users/logo_user",
+        f"/users/{user_id}",
         headers={"X-API-Key": bot_api_key},
     )
 
@@ -1042,7 +1047,7 @@ def test_get_user_profile_with_logo_and_emoji(client, registered_user):
 
     # User gets bot profile
     response = client.get(
-        "/users/test_bot",
+        f"/users/{bot_id}",
         headers={"X-API-Key": user_api_key},
     )
 
@@ -1065,11 +1070,12 @@ def test_get_user_profile_viewer(client, registered_user):
             "viewer": True,
         },
     )
-    
+    viewer_id = viewer_response.json()["id"]
+
     # Get viewer profile
     headers = {"X-API-Key": registered_user["api_key"]}
-    response = client.get("/users/viewer_user", headers=headers)
-    
+    response = client.get(f"/users/{viewer_id}", headers=headers)
+
     assert response.status_code == 200
     data = response.json()
     assert data["username"] == "viewer_user"
@@ -1161,7 +1167,7 @@ def test_websocket_get_messages_with_pagination(client, registered_user):
 
 def test_websocket_get_messages_with_since(client, registered_user):
     """Test getting room messages with since timestamp via WebSocket."""
-    from datetime import datetime, UTC, timedelta
+    from datetime import UTC, datetime
 
     headers = {"X-API-Key": registered_user["api_key"]}
 
@@ -1178,10 +1184,7 @@ def test_websocket_get_messages_with_since(client, registered_user):
 
     with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as websocket:
         # Request messages since timestamp
-        websocket.send_json({
-            "type": "get_messages",
-            "since": since_time.isoformat()
-        })
+        websocket.send_json({"type": "get_messages", "since": since_time.isoformat()})
 
         data = websocket.receive_json()
         assert data["type"] == "messages"
@@ -1196,10 +1199,7 @@ def test_websocket_get_messages_invalid_since(client, registered_user):
     """Test getting messages with invalid since timestamp via WebSocket."""
     with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as websocket:
         # Request messages with invalid timestamp
-        websocket.send_json({
-            "type": "get_messages",
-            "since": "invalid_timestamp"
-        })
+        websocket.send_json({"type": "get_messages", "since": "invalid_timestamp"})
 
         data = websocket.receive_json()
         assert data["type"] == "error"

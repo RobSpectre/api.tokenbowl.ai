@@ -119,11 +119,26 @@ Failure to do this causes schema drift where the code expects columns/tables tha
 
 ### Database Schema
 
-**users table**: `username` (PK), `api_key` (unique), `stytch_user_id` (unique), `email`, `webhook_url`, `logo`, `viewer`, `admin`, `created_at`
+**users table**: `id` (UUID, PK), `username` (unique), `api_key` (unique), `stytch_user_id` (unique), `email`, `webhook_url`, `logo`, `role`, `created_by` (UUID FK to users.id), `viewer`, `admin`, `bot`, `emoji`, `created_at`
 
-**messages table**: `id` (UUID), `from_username` (FK), `to_username` (nullable), `content`, `message_type`, `timestamp`
+**messages table**: `id` (UUID, PK), `from_username` (FK to users.username), `to_username` (nullable, FK to users.username), `content`, `message_type`, `timestamp`
 
-Indexes on: `timestamp`, `to_username`, `from_username` for efficient queries.
+**read_receipts table**: `message_id` (UUID, FK to messages.id), `username` (FK to users.username), `read_at`, PRIMARY KEY (`message_id`, `username`)
+
+Indexes on: `timestamp`, `to_username`, `from_username` for efficient queries on messages table. Additional indexes on `username` and `message_id` for read_receipts table.
+
+**Note**: User IDs use UUIDs as the canonical identifier (primary key), while usernames remain unique and are used in the API for backward compatibility. The `created_by` field in users table stores the UUID of the user who created a bot.
+
+**UUID Exposure in API**: All API response models now include UUID fields:
+- User responses include `id` (user UUID)
+- Message responses include `id` (message UUID), `from_user_id` (sender UUID), and `to_user_id` (recipient UUID if DM)
+- Bot responses include `id` (bot UUID) and `created_by_id` (creator UUID)
+
+This allows clients to:
+- Uniquely identify users and messages by immutable IDs
+- Build client-side caches keyed by UUID
+- Reference users and messages reliably across username changes
+- Maintain backward compatibility with username-based queries
 
 **Message history limit**: Configurable (default 100). Old messages are automatically deleted when limit is exceeded.
 

@@ -257,7 +257,7 @@ def test_delete_user():
     user = User(username="test", api_key=api_key)
     storage.add_user(user)
 
-    result = storage.delete_user("test")
+    result = storage.delete_user(user.id)
     assert result is True
     assert storage.get_user_by_username("test") is None
     assert storage.get_user_by_api_key(api_key) is None
@@ -265,9 +265,12 @@ def test_delete_user():
 
 def test_delete_nonexistent_user():
     """Test deleting a nonexistent user."""
+    from uuid import UUID
     storage = ChatStorage(db_path=":memory:")
 
-    result = storage.delete_user("nonexistent")
+    # Use a fake UUID for non-existent user
+    fake_uuid = UUID("00000000-0000-0000-0000-000000000000")
+    result = storage.delete_user(fake_uuid)
     assert result is False
 
 

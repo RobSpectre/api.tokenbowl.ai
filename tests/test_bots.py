@@ -133,9 +133,7 @@ def test_bot_profile_includes_bot_and_emoji(client: TestClient, registered_user:
     assert data["emoji"] == "👤"
 
 
-def test_admin_can_update_bot_fields(
-    client: TestClient, registered_user: dict
-) -> None:
+def test_admin_can_update_bot_fields(client: TestClient, registered_user: dict) -> None:
     """Test that admin can update bot and emoji fields."""
     # Register admin user
     admin_response = client.post(
@@ -156,10 +154,11 @@ def test_admin_can_update_bot_fields(
         },
     )
     assert user_response.status_code == status.HTTP_201_CREATED
+    user_id = user_response.json()["id"]
 
     # Admin updates user to bot
     response = client.patch(
-        "/admin/users/regular_user",
+        f"/admin/users/{user_id}",
         json={
             "bot": True,
             "emoji": "🔄",
@@ -232,10 +231,11 @@ def test_admin_get_single_user_includes_bot_fields(client: TestClient) -> None:
         headers={"X-API-Key": admin_api_key},
     )
     assert bot_response.status_code == status.HTTP_201_CREATED
+    bot_id = bot_response.json()["id"]
 
     # Get single user
     response = client.get(
-        "/admin/users/single_bot",
+        f"/admin/users/{bot_id}",
         headers={"X-API-Key": admin_api_key},
     )
 
@@ -269,7 +269,6 @@ async def test_bot_cannot_send_dm_via_websocket(client: TestClient, registered_u
 
     from fastapi import WebSocketDisconnect
 
-    from token_bowl_chat_server.models import User
     from token_bowl_chat_server.storage import storage
 
     # Create bot via /bots endpoint
@@ -315,11 +314,10 @@ async def test_bot_cannot_send_dm_via_websocket(client: TestClient, registered_u
     with patch("token_bowl_chat_server.api.websocket_auth", side_effect=mock_websocket_auth):
         from token_bowl_chat_server.api import websocket_endpoint
 
-        with patch(
-            "token_bowl_chat_server.api.connection_manager.connect"
-        ) as mock_connect, patch(
-            "token_bowl_chat_server.api.connection_manager.disconnect"
-        ) as mock_disconnect:
+        with (
+            patch("token_bowl_chat_server.api.connection_manager.connect") as mock_connect,
+            patch("token_bowl_chat_server.api.connection_manager.disconnect") as mock_disconnect,
+        ):
             mock_connect.return_value = None
             mock_disconnect.return_value = None
 
@@ -338,13 +336,14 @@ async def test_bot_cannot_send_dm_via_websocket(client: TestClient, registered_u
 
 
 @pytest.mark.asyncio
-async def test_bot_can_send_room_message_via_websocket(client: TestClient, registered_user: dict) -> None:
+async def test_bot_can_send_room_message_via_websocket(
+    client: TestClient, registered_user: dict
+) -> None:
     """Test that bots can send room messages via WebSocket."""
     from unittest.mock import AsyncMock, patch
 
     from fastapi import WebSocketDisconnect
 
-    from token_bowl_chat_server.models import User
     from token_bowl_chat_server.storage import storage
 
     # Create bot via /bots endpoint
@@ -380,13 +379,13 @@ async def test_bot_can_send_room_message_via_websocket(client: TestClient, regis
     with patch("token_bowl_chat_server.api.websocket_auth", side_effect=mock_websocket_auth):
         from token_bowl_chat_server.api import websocket_endpoint
 
-        with patch(
-            "token_bowl_chat_server.api.connection_manager.connect"
-        ) as mock_connect, patch(
-            "token_bowl_chat_server.api.connection_manager.disconnect"
-        ) as mock_disconnect, patch(
-            "token_bowl_chat_server.api.connection_manager.broadcast_to_room"
-        ) as mock_broadcast:
+        with (
+            patch("token_bowl_chat_server.api.connection_manager.connect") as mock_connect,
+            patch("token_bowl_chat_server.api.connection_manager.disconnect") as mock_disconnect,
+            patch(
+                "token_bowl_chat_server.api.connection_manager.broadcast_to_room"
+            ) as mock_broadcast,
+        ):
             mock_connect.return_value = None
             mock_disconnect.return_value = None
             mock_broadcast.return_value = None
@@ -428,11 +427,13 @@ def test_admin_setting_bot_true_clears_logo(client: TestClient) -> None:
         },
     )
     assert user_response.status_code == status.HTTP_201_CREATED
-    assert user_response.json()["logo"] == "openai.png"
+    user_data = user_response.json()
+    assert user_data["logo"] == "openai.png"
+    user_id = user_data["id"]
 
     # Admin sets bot=true - should automatically clear the logo
     response = client.patch(
-        "/admin/users/user_with_logo",
+        f"/admin/users/{user_id}",
         json={
             "bot": True,
             "emoji": "🤖",
@@ -469,10 +470,11 @@ def test_admin_cannot_set_bot_true_with_logo(client: TestClient) -> None:
         },
     )
     assert user_response.status_code == status.HTTP_201_CREATED
+    user_id = user_response.json()["id"]
 
     # Admin tries to set bot=true AND logo in same request - should fail
     response = client.patch(
-        "/admin/users/user_bot_logo",
+        f"/admin/users/{user_id}",
         json={
             "bot": True,
             "logo": "openai.png",
@@ -486,6 +488,7 @@ def test_admin_cannot_set_bot_true_with_logo(client: TestClient) -> None:
 
 
 # Bot ownership tests
+
 
 def test_create_bot_via_bots_endpoint(client: TestClient, registered_user: dict) -> None:
     """Test creating a bot via POST /bots endpoint."""
@@ -536,7 +539,7 @@ def test_get_my_bots(client: TestClient, registered_user: dict) -> None:
 
 
 def test_update_bot(client: TestClient, registered_user: dict) -> None:
-    """Test updating a bot via PATCH /bots/{bot_username}."""
+    """Test updating a bot via PATCH /bots/{bot_id}."""
     # Create bot
     create_response = client.post(
         "/bots",
@@ -544,10 +547,11 @@ def test_update_bot(client: TestClient, registered_user: dict) -> None:
         headers={"X-API-Key": registered_user["api_key"]},
     )
     assert create_response.status_code == status.HTTP_201_CREATED
+    bot_id = create_response.json()["id"]
 
     # Update bot
     response = client.patch(
-        "/bots/updateable_bot",
+        f"/bots/{bot_id}",
         json={
             "emoji": "🦿",
             "webhook_url": "https://example.com/new-webhook",
@@ -563,7 +567,9 @@ def test_update_bot(client: TestClient, registered_user: dict) -> None:
     assert data["created_by"] == registered_user["username"]
 
 
-def test_cannot_update_others_bot(client: TestClient, registered_user: dict, registered_user2: dict) -> None:
+def test_cannot_update_others_bot(
+    client: TestClient, registered_user: dict, registered_user2: dict
+) -> None:
     """Test that users cannot update bots they don't own."""
     # User 1 creates a bot
     create_response = client.post(
@@ -572,10 +578,11 @@ def test_cannot_update_others_bot(client: TestClient, registered_user: dict, reg
         headers={"X-API-Key": registered_user["api_key"]},
     )
     assert create_response.status_code == status.HTTP_201_CREATED
+    bot_id = create_response.json()["id"]
 
     # User 2 tries to update user 1's bot
     response = client.patch(
-        "/bots/user1_bot",
+        f"/bots/{bot_id}",
         json={"emoji": "🦾"},
         headers={"X-API-Key": registered_user2["api_key"]},
     )
@@ -585,7 +592,7 @@ def test_cannot_update_others_bot(client: TestClient, registered_user: dict, reg
 
 
 def test_delete_bot(client: TestClient, registered_user: dict) -> None:
-    """Test deleting a bot via DELETE /bots/{bot_username}."""
+    """Test deleting a bot via DELETE /bots/{bot_id}."""
     # Create bot
     create_response = client.post(
         "/bots",
@@ -593,10 +600,11 @@ def test_delete_bot(client: TestClient, registered_user: dict) -> None:
         headers={"X-API-Key": registered_user["api_key"]},
     )
     assert create_response.status_code == status.HTTP_201_CREATED
+    bot_id = create_response.json()["id"]
 
     # Delete bot
     response = client.delete(
-        "/bots/deletable_bot",
+        f"/bots/{bot_id}",
         headers={"X-API-Key": registered_user["api_key"]},
     )
 
@@ -611,7 +619,9 @@ def test_delete_bot(client: TestClient, registered_user: dict) -> None:
     assert not any(bot["username"] == "deletable_bot" for bot in bots)
 
 
-def test_cannot_delete_others_bot(client: TestClient, registered_user: dict, registered_user2: dict) -> None:
+def test_cannot_delete_others_bot(
+    client: TestClient, registered_user: dict, registered_user2: dict
+) -> None:
     """Test that users cannot delete bots they don't own."""
     # User 1 creates a bot
     create_response = client.post(
@@ -620,10 +630,11 @@ def test_cannot_delete_others_bot(client: TestClient, registered_user: dict, reg
         headers={"X-API-Key": registered_user["api_key"]},
     )
     assert create_response.status_code == status.HTTP_201_CREATED
+    bot_id = create_response.json()["id"]
 
     # User 2 tries to delete user 1's bot
     response = client.delete(
-        "/bots/user1_bot_delete",
+        f"/bots/{bot_id}",
         headers={"X-API-Key": registered_user2["api_key"]},
     )
 
@@ -640,11 +651,12 @@ def test_regenerate_bot_api_key(client: TestClient, registered_user: dict) -> No
         headers={"X-API-Key": registered_user["api_key"]},
     )
     assert create_response.status_code == status.HTTP_201_CREATED
+    bot_id = create_response.json()["id"]
     old_api_key = create_response.json()["api_key"]
 
     # Regenerate API key
     response = client.post(
-        "/bots/regen_bot/regenerate-api-key",
+        f"/bots/{bot_id}/regenerate-api-key",
         headers={"X-API-Key": registered_user["api_key"]},
     )
 
@@ -685,10 +697,11 @@ def test_admin_can_update_any_bot(client: TestClient, registered_user: dict) -> 
         headers={"X-API-Key": registered_user["api_key"]},
     )
     assert create_response.status_code == status.HTTP_201_CREATED
+    bot_id = create_response.json()["id"]
 
     # Admin updates the bot
     response = client.patch(
-        "/bots/user_bot",
+        f"/bots/{bot_id}",
         json={"emoji": "🦾"},
         headers={"X-API-Key": admin_api_key},
     )
@@ -714,10 +727,11 @@ def test_admin_can_delete_any_bot(client: TestClient, registered_user: dict) -> 
         headers={"X-API-Key": registered_user["api_key"]},
     )
     assert create_response.status_code == status.HTTP_201_CREATED
+    bot_id = create_response.json()["id"]
 
     # Admin deletes the bot
     response = client.delete(
-        "/bots/user_bot_delete",
+        f"/bots/{bot_id}",
         headers={"X-API-Key": admin_api_key},
     )
 

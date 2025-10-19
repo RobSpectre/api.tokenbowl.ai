@@ -158,7 +158,7 @@ async def register_with_chat_server() -> None:
                 data = response.json()
                 api_key = data["api_key"]
 
-                print(f"✓ Registered successfully!")
+                print("✓ Registered successfully!")
                 print(f"  Username: {data['username']}")
                 print(f"  API Key: {api_key[:32]}...")
                 print(f"  Webhook URL: {data['webhook_url']}")

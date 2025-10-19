@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime
-from typing import Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
 
@@ -16,6 +16,8 @@ from .models import (
     BotProfileResponse,
     CreateBotRequest,
     CreateBotResponse,
+    InviteUserRequest,
+    InviteUserResponse,
     Message,
     MessageResponse,
     MessageType,
@@ -108,6 +110,7 @@ async def register_user(registration: UserRegistration) -> UserRegistrationRespo
     logger.info(f"Registered new user {user.username} with role {role.value}")
 
     return UserRegistrationResponse(
+        id=str(user.id),
         username=user.username,
         api_key=api_key,
         role=role,
@@ -333,7 +336,7 @@ async def send_message(
 async def get_messages(
     limit: int = 50,
     offset: int = 0,
-    since: Optional[str] = None,
+    since: str | None = None,
     current_user: User = Depends(get_current_user),
 ) -> PaginatedMessagesResponse:
     """Get recent room messages with pagination.
@@ -394,7 +397,7 @@ async def get_messages(
 async def get_direct_messages(
     limit: int = 50,
     offset: int = 0,
-    since: Optional[str] = None,
+    since: str | None = None,
     current_user: User = Depends(get_current_user),
 ) -> PaginatedMessagesResponse:
     """Get direct messages for the current user with pagination.
@@ -593,6 +596,7 @@ async def get_users(current_user: User = Depends(get_current_user)) -> list[Publ
     users = storage.get_chat_users()
     return [
         PublicUserProfile(
+            id=str(user.id),
             username=user.username,
             role=user.role,
             logo=user.logo,
@@ -605,7 +609,9 @@ async def get_users(current_user: User = Depends(get_current_user)) -> list[Publ
 
 
 @router.get("/users/online", response_model=list[PublicUserProfile])
-async def get_online_users(current_user: User = Depends(get_current_user)) -> list[PublicUserProfile]:
+async def get_online_users(
+    current_user: User = Depends(get_current_user),
+) -> list[PublicUserProfile]:
     """Get list of users currently connected via WebSocket with their display info.
 
     Args:
@@ -621,6 +627,7 @@ async def get_online_users(current_user: User = Depends(get_current_user)) -> li
         if user:
             online_users.append(
                 PublicUserProfile(
+                    id=str(user.id),
                     username=user.username,
                     role=user.role,
                     logo=user.logo,
@@ -693,7 +700,7 @@ async def update_my_webhook(
     """
     # Update webhook URL
     webhook_str = str(request.webhook_url) if request.webhook_url else None
-    success = storage.update_user_webhook(current_user.username, webhook_str)
+    success = storage.update_user_webhook(current_user.id, webhook_str)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -719,6 +726,7 @@ async def get_my_profile(current_user: User = Depends(get_current_user)) -> User
         User profile with email, API key, and other information
     """
     return UserProfileResponse(
+        id=str(current_user.id),
         username=current_user.username,
         role=current_user.role,
         email=current_user.email,
@@ -769,6 +777,7 @@ async def update_my_username(
     logger.info(f"Updated username from {current_user.username} to {request.username}")
 
     return UserProfileResponse(
+        id=str(updated_user.id),
         username=updated_user.username,
         role=updated_user.role,
         email=updated_user.email,
@@ -805,7 +814,7 @@ async def regenerate_my_api_key(
     new_api_key = generate_api_key()
 
     # Update API key in storage
-    success = storage.update_user_api_key(current_user.username, new_api_key)
+    success = storage.update_user_api_key(current_user.id, new_api_key)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -820,9 +829,9 @@ async def regenerate_my_api_key(
     }
 
 
-@router.get("/users/{username}", response_model=PublicUserProfile)
+@router.get("/users/{user_id}", response_model=PublicUserProfile)
 async def get_user_profile(
-    username: str,
+    user_id: str,
     current_user: User = Depends(get_current_user),
 ) -> PublicUserProfile:
     """Get public profile for a specific user.
@@ -831,23 +840,32 @@ async def get_user_profile(
     without sensitive data (API key, email, webhook URL).
 
     Args:
-        username: Username to retrieve
+        user_id: User UUID to retrieve
         current_user: Authenticated user
 
     Returns:
         Public user profile
 
     Raises:
-        HTTPException: If user not found
+        HTTPException: If user not found or invalid UUID
     """
-    user = storage.get_user_by_username(username)
+    try:
+        user_uuid = UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid user ID format: {user_id}",
+        )
+
+    user = storage.get_user_by_id(user_uuid)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User {username} not found",
+            detail=f"User {user_id} not found",
         )
 
     return PublicUserProfile(
+        id=str(user.id),
         username=user.username,
         role=user.role,
         logo=user.logo,
@@ -858,7 +876,9 @@ async def get_user_profile(
 
 
 @router.get("/admin/users", response_model=list[UserProfileResponse])
-async def admin_get_all_users(admin_user: User = Depends(get_current_admin)) -> list[UserProfileResponse]:
+async def admin_get_all_users(
+    admin_user: User = Depends(get_current_admin),
+) -> list[UserProfileResponse]:
     """Admin: Get all users with full profile information.
 
     Args:
@@ -870,6 +890,7 @@ async def admin_get_all_users(admin_user: User = Depends(get_current_admin)) -> 
     users = storage.get_all_users()
     return [
         UserProfileResponse(
+            id=str(user.id),
             username=user.username,
             role=user.role,
             email=user.email,
@@ -886,31 +907,40 @@ async def admin_get_all_users(admin_user: User = Depends(get_current_admin)) -> 
     ]
 
 
-@router.get("/admin/users/{username}", response_model=UserProfileResponse)
+@router.get("/admin/users/{user_id}", response_model=UserProfileResponse)
 async def admin_get_user(
-    username: str,
+    user_id: str,
     admin_user: User = Depends(get_current_admin),
 ) -> UserProfileResponse:
     """Admin: Get a specific user's full profile.
 
     Args:
-        username: Username to retrieve
+        user_id: User UUID to retrieve
         admin_user: Authenticated admin user
 
     Returns:
         User profile
 
     Raises:
-        HTTPException: If user not found
+        HTTPException: If user not found or invalid UUID
     """
-    user = storage.get_user_by_username(username)
+    try:
+        user_uuid = UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid user ID format: {user_id}",
+        )
+
+    user = storage.get_user_by_id(user_uuid)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User {username} not found",
+            detail=f"User {user_id} not found",
         )
 
     return UserProfileResponse(
+        id=str(user.id),
         username=user.username,
         role=user.role,
         email=user.email,
@@ -925,16 +955,16 @@ async def admin_get_user(
     )
 
 
-@router.patch("/admin/users/{username}", response_model=UserProfileResponse)
+@router.patch("/admin/users/{user_id}", response_model=UserProfileResponse)
 async def admin_update_user(
-    username: str,
+    user_id: str,
     update_request: AdminUpdateUserRequest,
     admin_user: User = Depends(get_current_admin),
 ) -> UserProfileResponse:
     """Admin: Update any user's profile fields.
 
     Args:
-        username: Username to update
+        user_id: User UUID to update
         update_request: Fields to update
         admin_user: Authenticated admin user
 
@@ -942,82 +972,115 @@ async def admin_update_user(
         Updated user profile
 
     Raises:
-        HTTPException: If user not found
+        HTTPException: If user not found or invalid UUID
     """
+    try:
+        user_uuid = UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid user ID format: {user_id}",
+        )
+
+    # First check if user exists
+    user = storage.get_user_by_id(user_uuid)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User {user_id} not found",
+        )
+
+    # Determine logo value - if setting bot=true and user has a logo, we must clear it
+    # We need to explicitly pass a value to update, not None (which means "don't update")
+    logo_to_update = update_request.logo
+    if update_request.bot is True and user.logo and update_request.logo is None:
+        # User has a logo and we're setting bot=true, so we must clear the logo
+        # Pass an empty string which we'll convert to None in storage
+        logo_to_update = ""
+        logger.info(f"Cleared logo for {user.username} when setting bot=true")
+
     # Update user
     success = storage.admin_update_user(
-        username=username,
+        user_id=user_uuid,
         email=update_request.email,
         webhook_url=str(update_request.webhook_url) if update_request.webhook_url else None,
-        logo=update_request.logo,
+        logo=logo_to_update,  # Empty string will be converted to None in storage
         viewer=update_request.viewer,
         admin=update_request.admin,
         bot=update_request.bot,
         emoji=update_request.emoji,
     )
 
-    # If setting bot=true, clear any existing logo
-    if update_request.bot is True and success:
-        # Get current user to check if they have a logo
-        current_user_data = storage.get_user_by_username(username)
-        if current_user_data and current_user_data.logo:
-            # Clear the logo when setting bot=true
-            storage.update_user_logo(username, None)
-            logger.info(f"Cleared logo for {username} when setting bot=true")
-
     if not success:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User {username} not found",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update user",
         )
 
     # Fetch updated user
-    user = storage.get_user_by_username(username)
-    if not user:
+    updated_user = storage.get_user_by_id(user_uuid)
+    if not updated_user:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve updated user",
         )
 
-    logger.info(f"Admin {admin_user.username} updated user {username}")
+    logger.info(f"Admin {admin_user.username} updated user {updated_user.username}")
 
     return UserProfileResponse(
-        username=user.username,
-        role=user.role,
-        email=user.email,
-        api_key=user.api_key,
-        webhook_url=user.webhook_url,
-        logo=user.logo,
-        viewer=user.viewer,
-        admin=user.admin,
-        bot=user.bot,
-        emoji=user.emoji,
-        created_at=user.created_at.isoformat(),
+        id=str(updated_user.id),
+        username=updated_user.username,
+        role=updated_user.role,
+        email=updated_user.email,
+        api_key=updated_user.api_key,
+        webhook_url=updated_user.webhook_url,
+        logo=updated_user.logo,
+        viewer=updated_user.viewer,
+        admin=updated_user.admin,
+        bot=updated_user.bot,
+        emoji=updated_user.emoji,
+        created_at=updated_user.created_at.isoformat(),
     )
 
 
-@router.delete("/admin/users/{username}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/admin/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def admin_delete_user(
-    username: str,
+    user_id: str,
     admin_user: User = Depends(get_current_admin),
 ) -> None:
     """Admin: Delete a user.
 
     Args:
-        username: Username to delete
+        user_id: User UUID to delete
         admin_user: Authenticated admin user
 
     Raises:
-        HTTPException: If user not found
+        HTTPException: If user not found or invalid UUID
     """
-    success = storage.delete_user(username)
-    if not success:
+    try:
+        user_uuid = UUID(user_id)
+    except ValueError:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User {username} not found",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid user ID format: {user_id}",
         )
 
-    logger.info(f"Admin {admin_user.username} deleted user {username}")
+    # Get user first to log username
+    user = storage.get_user_by_id(user_uuid)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User {user_id} not found",
+        )
+
+    success = storage.delete_user(user_uuid)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete user",
+        )
+
+    logger.info(f"Admin {admin_user.username} deleted user {user.username}")
 
 
 @router.get("/admin/messages/{message_id}", response_model=MessageResponse)
@@ -1146,7 +1209,7 @@ async def create_bot(
         username=request.username,
         api_key=api_key,
         role=Role.BOT,
-        created_by=current_user.username,
+        created_by=current_user.id,
         emoji=request.emoji,
         webhook_url=request.webhook_url,
     )
@@ -1162,8 +1225,10 @@ async def create_bot(
     logger.info(f"User {current_user.username} created bot {bot.username}")
 
     return CreateBotResponse(
+        id=str(bot.id),
         username=bot.username,
         api_key=api_key,
+        created_by_id=str(current_user.id),
         created_by=current_user.username,
         emoji=bot.emoji,
         webhook_url=bot.webhook_url,
@@ -1184,29 +1249,40 @@ async def get_my_bots(
     """
     bots = storage.get_bots_by_creator(current_user.username)
 
-    return [
-        BotProfileResponse(
-            username=bot.username,
-            api_key=bot.api_key,
-            created_by=bot.created_by or "",  # Should always be set for bots
-            emoji=bot.emoji,
-            webhook_url=bot.webhook_url,
-            created_at=bot.created_at.isoformat(),
+    bot_responses = []
+    for bot in bots:
+        # Look up creator username from UUID
+        creator_username = ""
+        if bot.created_by:
+            creator = storage.get_user_by_id(bot.created_by)
+            creator_username = creator.username if creator else str(bot.created_by)
+
+        bot_responses.append(
+            BotProfileResponse(
+                id=str(bot.id),
+                username=bot.username,
+                api_key=bot.api_key,
+                created_by_id=str(bot.created_by) if bot.created_by else "",
+                created_by=creator_username,
+                emoji=bot.emoji,
+                webhook_url=bot.webhook_url,
+                created_at=bot.created_at.isoformat(),
+            )
         )
-        for bot in bots
-    ]
+
+    return bot_responses
 
 
-@router.patch("/bots/{bot_username}", response_model=BotProfileResponse)
+@router.patch("/bots/{bot_id}", response_model=BotProfileResponse)
 async def update_bot(
-    bot_username: str,
+    bot_id: str,
     request: UpdateBotRequest,
     current_user: User = Depends(get_current_user),
 ) -> BotProfileResponse:
     """Update a bot's configuration (owner or admin only).
 
     Args:
-        bot_username: Username of the bot to update
+        bot_id: Bot UUID to update
         request: Update request
         current_user: Authenticated user
 
@@ -1214,144 +1290,176 @@ async def update_bot(
         Updated bot profile
 
     Raises:
-        HTTPException: If bot not found or user doesn't own it
+        HTTPException: If bot not found, invalid UUID, or user doesn't own it
     """
+    try:
+        bot_uuid = UUID(bot_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid bot ID format: {bot_id}",
+        )
+
     # Get the bot
-    bot = storage.get_user_by_username(bot_username)
+    bot = storage.get_user_by_id(bot_uuid)
     if not bot or bot.role != Role.BOT:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Bot {bot_username} not found",
+            detail=f"Bot {bot_id} not found",
         )
 
     # Check ownership (or admin)
-    is_owner = bot.created_by == current_user.username
+    is_owner = bot.created_by == current_user.id
     is_admin = current_user.has_permission(Permission.UPDATE_ANY_BOT)
 
     if not (is_owner or is_admin):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"You don't have permission to update bot {bot_username}",
+            detail=f"You don't have permission to update bot {bot.username}",
         )
 
     # Update bot fields
     if request.emoji is not None:
-        storage.admin_update_user(bot_username, emoji=request.emoji)
+        storage.admin_update_user(bot_uuid, emoji=request.emoji)
 
     if request.webhook_url is not None:
         webhook_str = str(request.webhook_url) if request.webhook_url else None
-        storage.update_user_webhook(bot_username, webhook_str)
+        storage.update_user_webhook(bot_uuid, webhook_str)
 
     # Fetch updated bot
-    updated_bot = storage.get_user_by_username(bot_username)
+    updated_bot = storage.get_user_by_id(bot_uuid)
     if not updated_bot:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve updated bot",
         )
 
-    logger.info(f"User {current_user.username} updated bot {bot_username}")
+    logger.info(f"User {current_user.username} updated bot {updated_bot.username}")
+
+    # Look up creator username from UUID
+    creator_username = ""
+    if updated_bot.created_by:
+        creator = storage.get_user_by_id(updated_bot.created_by)
+        creator_username = creator.username if creator else str(updated_bot.created_by)
 
     return BotProfileResponse(
+        id=str(updated_bot.id),
         username=updated_bot.username,
         api_key=updated_bot.api_key,
-        created_by=updated_bot.created_by or "",
+        created_by_id=str(updated_bot.created_by) if updated_bot.created_by else "",
+        created_by=creator_username,
         emoji=updated_bot.emoji,
         webhook_url=updated_bot.webhook_url,
         created_at=updated_bot.created_at.isoformat(),
     )
 
 
-@router.delete("/bots/{bot_username}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/bots/{bot_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_bot(
-    bot_username: str,
+    bot_id: str,
     current_user: User = Depends(get_current_user),
 ) -> None:
     """Delete a bot (owner or admin only).
 
     Args:
-        bot_username: Username of the bot to delete
+        bot_id: Bot UUID to delete
         current_user: Authenticated user
 
     Raises:
-        HTTPException: If bot not found or user doesn't own it
+        HTTPException: If bot not found, invalid UUID, or user doesn't own it
     """
+    try:
+        bot_uuid = UUID(bot_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid bot ID format: {bot_id}",
+        )
+
     # Get the bot
-    bot = storage.get_user_by_username(bot_username)
+    bot = storage.get_user_by_id(bot_uuid)
     if not bot or bot.role != Role.BOT:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Bot {bot_username} not found",
+            detail=f"Bot {bot_id} not found",
         )
 
     # Check ownership (or admin)
-    is_owner = bot.created_by == current_user.username
+    is_owner = bot.created_by == current_user.id
     is_admin = current_user.has_permission(Permission.DELETE_ANY_BOT)
 
     if not (is_owner or is_admin):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"You don't have permission to delete bot {bot_username}",
+            detail=f"You don't have permission to delete bot {bot.username}",
         )
 
     # Delete the bot
-    success = storage.delete_user(bot_username)
+    success = storage.delete_user(bot_uuid)
     if not success:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Bot {bot_username} not found",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete bot",
         )
 
-    logger.info(f"User {current_user.username} deleted bot {bot_username}")
+    logger.info(f"User {current_user.username} deleted bot {bot.username}")
 
 
-@router.post("/bots/{bot_username}/regenerate-api-key", response_model=dict[str, str])
+@router.post("/bots/{bot_id}/regenerate-api-key", response_model=dict[str, str])
 async def regenerate_bot_api_key(
-    bot_username: str,
+    bot_id: str,
     current_user: User = Depends(get_current_user),
 ) -> dict[str, str]:
     """Regenerate a bot's API key (owner or admin only).
 
     Args:
-        bot_username: Username of the bot
+        bot_id: Bot UUID
         current_user: Authenticated user
 
     Returns:
         Success message with new API key
 
     Raises:
-        HTTPException: If bot not found or user doesn't own it
+        HTTPException: If bot not found, invalid UUID, or user doesn't own it
     """
+    try:
+        bot_uuid = UUID(bot_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid bot ID format: {bot_id}",
+        )
+
     # Get the bot
-    bot = storage.get_user_by_username(bot_username)
+    bot = storage.get_user_by_id(bot_uuid)
     if not bot or bot.role != Role.BOT:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Bot {bot_username} not found",
+            detail=f"Bot {bot_id} not found",
         )
 
     # Check ownership (or admin)
-    is_owner = bot.created_by == current_user.username
+    is_owner = bot.created_by == current_user.id
     is_admin = current_user.has_permission(Permission.UPDATE_ANY_BOT)
 
     if not (is_owner or is_admin):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"You don't have permission to regenerate API key for bot {bot_username}",
+            detail=f"You don't have permission to regenerate API key for bot {bot.username}",
         )
 
     # Generate new API key
     new_api_key = generate_api_key()
 
     # Update API key in storage
-    success = storage.update_user_api_key(bot_username, new_api_key)
+    success = storage.update_user_api_key(bot_uuid, new_api_key)
     if not success:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Bot {bot_username} not found",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update bot API key",
         )
 
-    logger.info(f"User {current_user.username} regenerated API key for bot {bot_username}")
+    logger.info(f"User {current_user.username} regenerated API key for bot {bot.username}")
 
     return {
         "message": "Bot API key regenerated successfully",
@@ -1359,16 +1467,16 @@ async def regenerate_bot_api_key(
     }
 
 
-@router.patch("/admin/users/{username}/role", response_model=AssignRoleResponse)
+@router.patch("/admin/users/{user_id}/role", response_model=AssignRoleResponse)
 async def assign_user_role(
-    username: str,
+    user_id: str,
     request: AssignRoleRequest,
     admin_user: User = Depends(require_permission(Permission.ASSIGN_ROLES)),
 ) -> AssignRoleResponse:
     """Admin: Assign a role to a user.
 
     Args:
-        username: Username to assign role to
+        user_id: User UUID to assign role to
         request: Role assignment request
         admin_user: Authenticated admin user with ASSIGN_ROLES permission
 
@@ -1376,18 +1484,26 @@ async def assign_user_role(
         Role assignment response
 
     Raises:
-        HTTPException: If user not found
+        HTTPException: If user not found or invalid UUID
     """
+    try:
+        user_uuid = UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid user ID format: {user_id}",
+        )
+
     # Verify user exists
-    user = storage.get_user_by_username(username)
+    user = storage.get_user_by_id(user_uuid)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User {username} not found",
+            detail=f"User {user_id} not found",
         )
 
     # Update role in database
-    success = storage.update_user_role(username, request.role)
+    success = storage.update_user_role(user_uuid, request.role)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1398,18 +1514,71 @@ async def assign_user_role(
     if user.stytch_user_id and stytch_client.enabled:
         try:
             await stytch_client.set_user_role(user.stytch_user_id, request.role)
-            logger.info(f"Synced role {request.role.value} to Stytch for user {username}")
+            logger.info(f"Synced role {request.role.value} to Stytch for user {user.username}")
         except Exception as e:
-            logger.error(f"Failed to sync role to Stytch for user {username}: {e}")
+            logger.error(f"Failed to sync role to Stytch for user {user.username}: {e}")
             # Don't fail the request if Stytch sync fails - database is source of truth
 
-    logger.info(f"Admin {admin_user.username} assigned role {request.role.value} to user {username}")
+    logger.info(
+        f"Admin {admin_user.username} assigned role {request.role.value} to user {user.username}"
+    )
 
     return AssignRoleResponse(
-        username=username,
+        username=user.username,
         role=request.role,
-        message=f"Successfully assigned role '{request.role.value}' to user {username}",
+        message=f"Successfully assigned role '{request.role.value}' to user {user.username}",
     )
+
+
+@router.post("/admin/invite", response_model=InviteUserResponse)
+async def invite_user_by_email(
+    request: InviteUserRequest,
+    admin_user: User = Depends(get_current_admin),
+) -> InviteUserResponse:
+    """Admin: Invite a user by email using Stytch magic link.
+
+    Sends a magic link invitation to the specified email address. When the user clicks
+    the link and authenticates, they will be automatically registered with the specified role.
+
+    Args:
+        request: Invite request with email, role, and signup URL
+        admin_user: Authenticated admin user
+
+    Returns:
+        Invite response with confirmation
+
+    Raises:
+        HTTPException: If Stytch is not enabled or invitation fails
+    """
+    if not stytch_client.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Email invitations are not available. Stytch is not configured.",
+        )
+
+    try:
+        # Send magic link via Stytch
+        await stytch_client.send_magic_link(
+            email=request.email,
+            signup_magic_link_url=request.signup_url,
+        )
+
+        logger.info(
+            f"Admin {admin_user.username} sent invitation to {request.email} with role {request.role.value}"
+        )
+
+        return InviteUserResponse(
+            email=request.email,
+            role=request.role,
+            message=f"Invitation sent successfully to {request.email}. User will be assigned role '{request.role.value}' upon registration.",
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to send invitation to {request.email}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to send invitation: {str(e)}",
+        )
 
 
 @router.websocket("/ws")
@@ -1517,7 +1686,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     content=content,
                     message_type=message_type,
                 )
-                logger.info(f"[DEBUG] About to save WebSocket message from {user.username}: {content[:50]}...")
+                logger.info(
+                    f"[DEBUG] About to save WebSocket message from {user.username}: {content[:50]}..."
+                )
                 storage.add_message(message)
                 logger.info(f"[DEBUG] Message saved successfully! ID: {message.id}")
 
@@ -1560,7 +1731,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     {
                         "type": "message_sent",
                         "status": "sent",
-                        "message": MessageResponse.from_message(message, from_user=user).model_dump(),
+                        "message": MessageResponse.from_message(
+                            message, from_user=user
+                        ).model_dump(),
                     }
                 )
 
@@ -1635,11 +1808,11 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     storage.mark_message_as_read(str(msg.id), user.username)
                     count += 1
 
-                logger.info(f"User {user.username} marked {count} room messages as read via WebSocket")
-
-                await websocket.send_json(
-                    {"status": "marked_read", "count": count}
+                logger.info(
+                    f"User {user.username} marked {count} room messages as read via WebSocket"
                 )
+
+                await websocket.send_json({"status": "marked_read", "count": count})
 
             elif msg_type == "mark_direct_read":
                 # Mark all direct messages from a specific user as read
@@ -1681,7 +1854,10 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
                     except ValueError:
                         await websocket.send_json(
-                            {"type": "error", "error": "Invalid timestamp format. Use ISO 8601 format."}
+                            {
+                                "type": "error",
+                                "error": "Invalid timestamp format. Use ISO 8601 format.",
+                            }
                         )
                         continue
 
@@ -1699,9 +1875,13 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 message_responses = []
                 for msg in messages:
                     if msg.from_username not in user_cache:
-                        user_cache[msg.from_username] = storage.get_user_by_username(msg.from_username)
+                        user_cache[msg.from_username] = storage.get_user_by_username(
+                            msg.from_username
+                        )
                     message_responses.append(
-                        MessageResponse.from_message(msg, from_user=user_cache[msg.from_username]).model_dump()
+                        MessageResponse.from_message(
+                            msg, from_user=user_cache[msg.from_username]
+                        ).model_dump()
                     )
 
                 await websocket.send_json(
@@ -1730,7 +1910,10 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
                     except ValueError:
                         await websocket.send_json(
-                            {"type": "error", "error": "Invalid timestamp format. Use ISO 8601 format."}
+                            {
+                                "type": "error",
+                                "error": "Invalid timestamp format. Use ISO 8601 format.",
+                            }
                         )
                         continue
 
@@ -1750,9 +1933,13 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 message_responses = []
                 for msg in messages:
                     if msg.from_username not in user_cache:
-                        user_cache[msg.from_username] = storage.get_user_by_username(msg.from_username)
+                        user_cache[msg.from_username] = storage.get_user_by_username(
+                            msg.from_username
+                        )
                     message_responses.append(
-                        MessageResponse.from_message(msg, from_user=user_cache[msg.from_username]).model_dump()
+                        MessageResponse.from_message(
+                            msg, from_user=user_cache[msg.from_username]
+                        ).model_dump()
                     )
 
                 await websocket.send_json(
@@ -1773,16 +1960,22 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 limit = data.get("limit", 50)
                 offset = data.get("offset", 0)
 
-                messages = storage.get_unread_room_messages(user.username, limit=limit, offset=offset)
+                messages = storage.get_unread_room_messages(
+                    user.username, limit=limit, offset=offset
+                )
 
                 # Fetch user info for all message senders
                 user_cache = {}
                 message_responses = []
                 for msg in messages:
                     if msg.from_username not in user_cache:
-                        user_cache[msg.from_username] = storage.get_user_by_username(msg.from_username)
+                        user_cache[msg.from_username] = storage.get_user_by_username(
+                            msg.from_username
+                        )
                     message_responses.append(
-                        MessageResponse.from_message(msg, from_user=user_cache[msg.from_username]).model_dump()
+                        MessageResponse.from_message(
+                            msg, from_user=user_cache[msg.from_username]
+                        ).model_dump()
                     )
 
                 await websocket.send_json(
@@ -1797,16 +1990,22 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 limit = data.get("limit", 50)
                 offset = data.get("offset", 0)
 
-                messages = storage.get_unread_direct_messages(user.username, limit=limit, offset=offset)
+                messages = storage.get_unread_direct_messages(
+                    user.username, limit=limit, offset=offset
+                )
 
                 # Fetch user info for all message senders
                 user_cache = {}
                 message_responses = []
                 for msg in messages:
                     if msg.from_username not in user_cache:
-                        user_cache[msg.from_username] = storage.get_user_by_username(msg.from_username)
+                        user_cache[msg.from_username] = storage.get_user_by_username(
+                            msg.from_username
+                        )
                     message_responses.append(
-                        MessageResponse.from_message(msg, from_user=user_cache[msg.from_username]).model_dump()
+                        MessageResponse.from_message(
+                            msg, from_user=user_cache[msg.from_username]
+                        ).model_dump()
                     )
 
                 await websocket.send_json(
@@ -1868,9 +2067,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 username = data.get("username")
 
                 if not username:
-                    await websocket.send_json(
-                        {"type": "error", "error": "Missing username field"}
-                    )
+                    await websocket.send_json({"type": "error", "error": "Missing username field"})
                     continue
 
                 u = storage.get_user_by_username(username)

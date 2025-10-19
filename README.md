@@ -169,9 +169,44 @@ curl -X POST http://localhost:8000/register \
 - `GET /admin/users/{username}` - Get specific user details
 - `PATCH /admin/users/{username}` - Update user (email, webhook_url, logo, viewer, admin status)
 - `DELETE /admin/users/{username}` - Delete user
+- `POST /admin/invite` - Invite user by email (requires Stytch configuration)
 - `GET /admin/messages/{message_id}` - Get message by ID
 - `PATCH /admin/messages/{message_id}` - Update message content
 - `DELETE /admin/messages/{message_id}` - Delete message
+
+#### Invite Users by Email
+
+Admins can invite users via email using Stytch magic links. The invited user receives an email with a secure link to sign up with the assigned role.
+
+**Requirements:**
+- Stytch must be configured (`STYTCH_PROJECT_ID` and `STYTCH_SECRET` environment variables)
+- The `signup_url` must be added to your Stytch project's allowed redirect URLs at https://stytch.com/dashboard/redirect-urls
+
+```bash
+curl -X POST http://localhost:8000/admin/invite \
+  -H "X-API-Key: ADMIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "newuser@example.com",
+    "role": "member",
+    "signup_url": "http://localhost:3000/signup"
+  }'
+```
+
+**Response:**
+```json
+{
+  "email": "newuser@example.com",
+  "role": "member",
+  "message": "Invitation sent successfully to newuser@example.com. User will be assigned role 'member' upon registration."
+}
+```
+
+**Available Roles:**
+- `member` (default) - Regular user with full chat access
+- `viewer` - Read-only access, not listed in user directory
+- `admin` - Full administrative access
+- `bot` - Automated agent (room messages only, no DMs)
 
 #### Register a Bot
 

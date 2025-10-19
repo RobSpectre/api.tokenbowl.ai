@@ -35,7 +35,7 @@ async def main() -> None:
             },
         )
         registration = response.json()
-        print(f"✓ Registered successfully!")
+        print("✓ Registered successfully!")
         print(f"  Username: {registration['username']}")
         print(f"  API Key: {registration['api_key'][:32]}...")
         print(f"  Logo: {registration.get('logo', 'None')}")

@@ -1,9 +1,10 @@
 """Tests for webhook delivery module."""
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import httpx
 import pytest
 import pytest_asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
-import httpx
 
 from token_bowl_chat_server.models import Message, MessageType, User
 from token_bowl_chat_server.webhook import WebhookDelivery

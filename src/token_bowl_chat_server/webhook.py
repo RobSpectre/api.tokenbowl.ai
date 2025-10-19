@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-from typing import Optional
 
 import httpx
 
@@ -23,7 +22,7 @@ class WebhookDelivery:
         """
         self.timeout = timeout
         self.max_retries = max_retries
-        self.client: Optional[httpx.AsyncClient] = None
+        self.client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
         """Start the webhook delivery system."""
@@ -55,6 +54,7 @@ class WebhookDelivery:
 
         # Fetch sender user info for display
         from .storage import storage
+
         from_user = storage.get_user_by_username(message.from_username)
         message_data = MessageResponse.from_message(message, from_user=from_user).model_dump()
 
@@ -103,7 +103,7 @@ class WebhookDelivery:
         return False
 
     async def broadcast_to_webhooks(
-        self, message: Message, users: list[User], exclude_username: Optional[str] = None
+        self, message: Message, users: list[User], exclude_username: str | None = None
     ) -> None:
         """Broadcast a message to multiple users via webhooks.
 

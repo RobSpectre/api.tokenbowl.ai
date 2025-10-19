@@ -1,19 +1,18 @@
 """Tests for Role-Based Access Control (RBAC) system."""
 
-import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
 
-from token_bowl_chat_server.models import Permission, Role
 
-
-def test_role_assignment_by_admin(client: TestClient, registered_user: dict, registered_admin: dict) -> None:
+def test_role_assignment_by_admin(
+    client: TestClient, registered_user: dict, registered_admin: dict
+) -> None:
     """Test that admins can assign roles to users."""
     admin_headers = {"X-API-Key": registered_admin["api_key"]}
 
     # Assign viewer role
     response = client.patch(
-        f"/admin/users/{registered_user['username']}/role",
+        f"/admin/users/{registered_user['id']}/role",
         json={"role": "viewer"},
         headers=admin_headers,
     )
@@ -25,12 +24,14 @@ def test_role_assignment_by_admin(client: TestClient, registered_user: dict, reg
     assert "Successfully assigned role" in data["message"]
 
 
-def test_role_assignment_by_non_admin(client: TestClient, registered_user: dict, registered_user2: dict) -> None:
+def test_role_assignment_by_non_admin(
+    client: TestClient, registered_user: dict, registered_user2: dict
+) -> None:
     """Test that non-admins cannot assign roles."""
     headers = {"X-API-Key": registered_user["api_key"]}
 
     response = client.patch(
-        f"/admin/users/{registered_user2['username']}/role",
+        f"/admin/users/{registered_user2['id']}/role",
         json={"role": "admin"},
         headers=headers,
     )
@@ -38,13 +39,15 @@ def test_role_assignment_by_non_admin(client: TestClient, registered_user: dict,
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
-def test_assign_all_roles(client: TestClient, registered_user: dict, registered_admin: dict) -> None:
+def test_assign_all_roles(
+    client: TestClient, registered_user: dict, registered_admin: dict
+) -> None:
     """Test assigning each role type."""
     admin_headers = {"X-API-Key": registered_admin["api_key"]}
 
     for role in ["admin", "member", "viewer", "bot"]:
         response = client.patch(
-            f"/admin/users/{registered_user['username']}/role",
+            f"/admin/users/{registered_user['id']}/role",
             json={"role": role},
             headers=admin_headers,
         )
@@ -87,7 +90,9 @@ def test_viewer_cannot_create_bot(client: TestClient) -> None:
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
-def test_member_can_send_direct_messages(client: TestClient, registered_user: dict, registered_user2: dict) -> None:
+def test_member_can_send_direct_messages(
+    client: TestClient, registered_user: dict, registered_user2: dict
+) -> None:
     """Test that members have SEND_DIRECT_MESSAGE permission."""
     headers = {"X-API-Key": registered_user["api_key"]}
 
@@ -128,12 +133,14 @@ def test_member_can_update_own_profile(client: TestClient, registered_user: dict
     assert response.status_code == status.HTTP_200_OK
 
 
-def test_member_cannot_update_any_user(client: TestClient, registered_user: dict, registered_user2: dict) -> None:
+def test_member_cannot_update_any_user(
+    client: TestClient, registered_user: dict, registered_user2: dict
+) -> None:
     """Test that members don't have UPDATE_ANY_USER permission."""
     headers = {"X-API-Key": registered_user["api_key"]}
 
     response = client.patch(
-        f"/admin/users/{registered_user2['username']}",
+        f"/admin/users/{registered_user2['id']}",
         json={"email": "hacked@example.com"},
         headers=headers,
     )
@@ -141,7 +148,9 @@ def test_member_cannot_update_any_user(client: TestClient, registered_user: dict
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
-def test_admin_has_all_permissions(client: TestClient, registered_user: dict, registered_admin: dict) -> None:
+def test_admin_has_all_permissions(
+    client: TestClient, registered_user: dict, registered_admin: dict
+) -> None:
     """Test that admins have all permissions."""
     admin_headers = {"X-API-Key": registered_admin["api_key"]}
 
@@ -155,7 +164,7 @@ def test_admin_has_all_permissions(client: TestClient, registered_user: dict, re
 
     # Can update any user
     response = client.patch(
-        f"/admin/users/{registered_user['username']}",
+        f"/admin/users/{registered_user['id']}",
         json={"email": "admin-updated@example.com"},
         headers=admin_headers,
     )
@@ -164,7 +173,7 @@ def test_admin_has_all_permissions(client: TestClient, registered_user: dict, re
     # Can delete user
     temp_user = client.post("/register", json={"username": "temp_user"}).json()
     response = client.delete(
-        f"/admin/users/{temp_user['username']}",
+        f"/admin/users/{temp_user['id']}",
         headers=admin_headers,
     )
     assert response.status_code == status.HTTP_204_NO_CONTENT
@@ -247,7 +256,9 @@ def test_bot_permissions(client: TestClient, registered_user: dict) -> None:
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
-def test_role_persistence_after_update(client: TestClient, registered_user: dict, registered_admin: dict) -> None:
+def test_role_persistence_after_update(
+    client: TestClient, registered_user: dict, registered_admin: dict
+) -> None:
     """Test that role changes persist across requests."""
     admin_headers = {"X-API-Key": registered_admin["api_key"]}
     user_headers = {"X-API-Key": registered_user["api_key"]}
@@ -257,7 +268,7 @@ def test_role_persistence_after_update(client: TestClient, registered_user: dict
 
     # Change user to viewer
     response = client.patch(
-        f"/admin/users/{registered_user['username']}/role",
+        f"/admin/users/{registered_user['id']}/role",
         json={"role": "viewer"},
         headers=admin_headers,
     )
@@ -273,7 +284,7 @@ def test_role_persistence_after_update(client: TestClient, registered_user: dict
 
     # Change back to member
     response = client.patch(
-        f"/admin/users/{registered_user['username']}/role",
+        f"/admin/users/{registered_user['id']}/role",
         json={"role": "member"},
         headers=admin_headers,
     )
@@ -305,12 +316,14 @@ def test_legacy_fields_sync_with_role(client: TestClient) -> None:
     assert data["bot"] is False
 
 
-def test_invalid_role_assignment(client: TestClient, registered_user: dict, registered_admin: dict) -> None:
+def test_invalid_role_assignment(
+    client: TestClient, registered_user: dict, registered_admin: dict
+) -> None:
     """Test that invalid role assignment fails."""
     admin_headers = {"X-API-Key": registered_admin["api_key"]}
 
     response = client.patch(
-        f"/admin/users/{registered_user['username']}/role",
+        f"/admin/users/{registered_user['id']}/role",
         json={"role": "super_admin"},  # Invalid role
         headers=admin_headers,
     )
@@ -323,7 +336,7 @@ def test_role_assignment_to_nonexistent_user(client: TestClient, registered_admi
     admin_headers = {"X-API-Key": registered_admin["api_key"]}
 
     response = client.patch(
-        "/admin/users/nonexistent_user/role",
+        "/admin/users/00000000-0000-0000-0000-000000000000/role",
         json={"role": "admin"},
         headers=admin_headers,
     )

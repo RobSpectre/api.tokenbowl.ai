@@ -1,7 +1,8 @@
 """Tests for server startup and shutdown lifecycle."""
 
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
 from fastapi.testclient import TestClient
 
 from token_bowl_chat_server.server import create_app, lifespan

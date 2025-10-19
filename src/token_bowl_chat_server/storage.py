@@ -1,11 +1,11 @@
 """SQLite storage for users and messages."""
 
 import sqlite3
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Generator, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from alembic import command
 from alembic.config import Config
@@ -28,7 +28,7 @@ class ChatStorage:
         self.message_history_limit = message_history_limit
 
         # Keep persistent connection for in-memory databases
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
         if db_path == ":memory:":
             # check_same_thread=False allows connection to be used across threads (safe for in-memory DB)
             self._conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -47,7 +47,8 @@ class ChatStorage:
                 # Create users table
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS users (
-                        username TEXT PRIMARY KEY,
+                        id TEXT PRIMARY KEY,
+                        username TEXT UNIQUE NOT NULL,
                         api_key TEXT UNIQUE NOT NULL,
                         stytch_user_id TEXT UNIQUE,
                         email TEXT,
@@ -59,7 +60,8 @@ class ChatStorage:
                         admin INTEGER NOT NULL DEFAULT 0,
                         bot INTEGER NOT NULL DEFAULT 0,
                         emoji TEXT,
-                        created_at TEXT NOT NULL
+                        created_at TEXT NOT NULL,
+                        FOREIGN KEY (created_by) REFERENCES users(id)
                     )
                 """)
 
@@ -176,10 +178,11 @@ class ChatStorage:
             # Insert user
             cursor.execute(
                 """
-                INSERT INTO users (username, api_key, stytch_user_id, email, webhook_url, logo, role, created_by, viewer, admin, bot, emoji, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO users (id, username, api_key, stytch_user_id, email, webhook_url, logo, role, created_by, viewer, admin, bot, emoji, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
+                    str(user.id),
                     user.username,
                     user.api_key,
                     user.stytch_user_id,
@@ -187,7 +190,7 @@ class ChatStorage:
                     str(user.webhook_url) if user.webhook_url else None,
                     user.logo,
                     user.role.value,
-                    user.created_by,
+                    str(user.created_by) if user.created_by else None,
                     1 if user.viewer else 0,
                     1 if user.admin else 0,
                     1 if user.bot else 0,
@@ -197,7 +200,43 @@ class ChatStorage:
             )
             conn.commit()
 
-    def get_user_by_username(self, username: str) -> Optional[User]:
+    def get_user_by_id(self, user_id: UUID) -> User | None:
+        """Get user by ID.
+
+        Args:
+            user_id: User ID to look up
+
+        Returns:
+            User if found, None otherwise
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM users WHERE id = ?", (str(user_id),))
+            row = cursor.fetchone()
+
+            if not row:
+                return None
+
+            return User(
+                id=UUID(row["id"]) if "id" in row.keys() else uuid4(),
+                username=row["username"],
+                api_key=row["api_key"],
+                stytch_user_id=row["stytch_user_id"],
+                email=row["email"],
+                webhook_url=HttpUrl(row["webhook_url"]) if row["webhook_url"] else None,
+                logo=row["logo"],
+                role=Role(row["role"]) if "role" in row.keys() else Role.MEMBER,
+                created_by=UUID(row["created_by"])
+                if ("created_by" in row.keys() and row["created_by"])
+                else None,
+                viewer=bool(row["viewer"]),
+                admin=bool(row["admin"]),
+                bot=bool(row["bot"] if "bot" in row.keys() else 0),
+                emoji=row["emoji"] if "emoji" in row.keys() else None,
+                created_at=datetime.fromisoformat(row["created_at"]),
+            )
+
+    def get_user_by_username(self, username: str) -> User | None:
         """Get user by username.
 
         Args:
@@ -215,6 +254,7 @@ class ChatStorage:
                 return None
 
             return User(
+                id=UUID(row["id"]) if "id" in row.keys() else uuid4(),
                 username=row["username"],
                 api_key=row["api_key"],
                 stytch_user_id=row["stytch_user_id"],
@@ -222,7 +262,9 @@ class ChatStorage:
                 webhook_url=HttpUrl(row["webhook_url"]) if row["webhook_url"] else None,
                 logo=row["logo"],
                 role=Role(row["role"]) if "role" in row.keys() else Role.MEMBER,
-                created_by=row["created_by"] if "created_by" in row.keys() else None,
+                created_by=UUID(row["created_by"])
+                if ("created_by" in row.keys() and row["created_by"])
+                else None,
                 viewer=bool(row["viewer"]),
                 admin=bool(row["admin"]),
                 bot=bool(row["bot"] if "bot" in row.keys() else 0),
@@ -230,7 +272,7 @@ class ChatStorage:
                 created_at=datetime.fromisoformat(row["created_at"]),
             )
 
-    def get_user_by_api_key(self, api_key: str) -> Optional[User]:
+    def get_user_by_api_key(self, api_key: str) -> User | None:
         """Get user by API key.
 
         Args:
@@ -248,6 +290,7 @@ class ChatStorage:
                 return None
 
             return User(
+                id=UUID(row["id"]) if "id" in row.keys() else uuid4(),
                 username=row["username"],
                 api_key=row["api_key"],
                 stytch_user_id=row["stytch_user_id"],
@@ -255,7 +298,9 @@ class ChatStorage:
                 webhook_url=HttpUrl(row["webhook_url"]) if row["webhook_url"] else None,
                 logo=row["logo"],
                 role=Role(row["role"]) if "role" in row.keys() else Role.MEMBER,
-                created_by=row["created_by"] if "created_by" in row.keys() else None,
+                created_by=UUID(row["created_by"])
+                if ("created_by" in row.keys() and row["created_by"])
+                else None,
                 viewer=bool(row["viewer"]),
                 admin=bool(row["admin"]),
                 bot=bool(row["bot"] if "bot" in row.keys() else 0),
@@ -263,7 +308,7 @@ class ChatStorage:
                 created_at=datetime.fromisoformat(row["created_at"]),
             )
 
-    def get_user_by_stytch_id(self, stytch_user_id: str) -> Optional[User]:
+    def get_user_by_stytch_id(self, stytch_user_id: str) -> User | None:
         """Get user by Stytch user ID.
 
         Args:
@@ -281,6 +326,7 @@ class ChatStorage:
                 return None
 
             return User(
+                id=UUID(row["id"]) if "id" in row.keys() else uuid4(),
                 username=row["username"],
                 api_key=row["api_key"],
                 stytch_user_id=row["stytch_user_id"],
@@ -288,7 +334,9 @@ class ChatStorage:
                 webhook_url=HttpUrl(row["webhook_url"]) if row["webhook_url"] else None,
                 logo=row["logo"],
                 role=Role(row["role"]) if "role" in row.keys() else Role.MEMBER,
-                created_by=row["created_by"] if "created_by" in row.keys() else None,
+                created_by=UUID(row["created_by"])
+                if ("created_by" in row.keys() and row["created_by"])
+                else None,
                 viewer=bool(row["viewer"]),
                 admin=bool(row["admin"]),
                 bot=bool(row["bot"] if "bot" in row.keys() else 0),
@@ -296,7 +344,7 @@ class ChatStorage:
                 created_at=datetime.fromisoformat(row["created_at"]),
             )
 
-    def update_user_logo(self, username: str, logo: Optional[str]) -> bool:
+    def update_user_logo(self, username: str, logo: str | None) -> bool:
         """Update a user's logo.
 
         Args:
@@ -312,11 +360,11 @@ class ChatStorage:
             conn.commit()
             return cursor.rowcount > 0
 
-    def update_user_webhook(self, username: str, webhook_url: Optional[str]) -> bool:
+    def update_user_webhook(self, user_id: UUID, webhook_url: str | None) -> bool:
         """Update a user's webhook URL.
 
         Args:
-            username: Username to update
+            user_id: User UUID to update
             webhook_url: New webhook URL (or None to clear)
 
         Returns:
@@ -324,15 +372,17 @@ class ChatStorage:
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("UPDATE users SET webhook_url = ? WHERE username = ?", (webhook_url, username))
+            cursor.execute(
+                "UPDATE users SET webhook_url = ? WHERE id = ?", (webhook_url, str(user_id))
+            )
             conn.commit()
             return cursor.rowcount > 0
 
-    def update_user_api_key(self, username: str, new_api_key: str) -> bool:
+    def update_user_api_key(self, user_id: UUID, new_api_key: str) -> bool:
         """Update a user's API key.
 
         Args:
-            username: Username to update
+            user_id: User UUID to update
             new_api_key: New API key
 
         Returns:
@@ -340,15 +390,17 @@ class ChatStorage:
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("UPDATE users SET api_key = ? WHERE username = ?", (new_api_key, username))
+            cursor.execute(
+                "UPDATE users SET api_key = ? WHERE id = ?", (new_api_key, str(user_id))
+            )
             conn.commit()
             return cursor.rowcount > 0
 
-    def update_user_role(self, username: str, role: Role) -> bool:
+    def update_user_role(self, user_id: UUID, role: Role) -> bool:
         """Update a user's role.
 
         Args:
-            username: Username to update
+            user_id: User UUID to update
             role: New role
 
         Returns:
@@ -364,14 +416,14 @@ class ChatStorage:
                     admin = ?,
                     viewer = ?,
                     bot = ?
-                WHERE username = ?
+                WHERE id = ?
                 """,
                 (
                     role.value,
                     1 if role == Role.ADMIN else 0,
                     1 if role == Role.VIEWER else 0,
                     1 if role == Role.BOT else 0,
-                    username,
+                    str(user_id),
                 ),
             )
             conn.commit()
@@ -401,11 +453,19 @@ class ChatStorage:
                 raise ValueError(f"Username {new_username} already exists")
 
             # Update username in users table
-            cursor.execute("UPDATE users SET username = ? WHERE username = ?", (new_username, old_username))
+            cursor.execute(
+                "UPDATE users SET username = ? WHERE username = ?", (new_username, old_username)
+            )
 
             # Update username in messages table (both from and to)
-            cursor.execute("UPDATE messages SET from_username = ? WHERE from_username = ?", (new_username, old_username))
-            cursor.execute("UPDATE messages SET to_username = ? WHERE to_username = ?", (new_username, old_username))
+            cursor.execute(
+                "UPDATE messages SET from_username = ? WHERE from_username = ?",
+                (new_username, old_username),
+            )
+            cursor.execute(
+                "UPDATE messages SET to_username = ? WHERE to_username = ?",
+                (new_username, old_username),
+            )
 
             conn.commit()
 
@@ -456,7 +516,7 @@ class ChatStorage:
             conn.commit()
 
     def get_recent_messages(
-        self, limit: int = 50, offset: int = 0, since: Optional[datetime] = None
+        self, limit: int = 50, offset: int = 0, since: datetime | None = None
     ) -> list[Message]:
         """Get recent room messages with pagination support.
 
@@ -487,7 +547,7 @@ class ChatStorage:
             return [self._row_to_message(row) for row in rows]
 
     def get_direct_messages(
-        self, username: str, limit: int = 50, offset: int = 0, since: Optional[datetime] = None
+        self, username: str, limit: int = 50, offset: int = 0, since: datetime | None = None
     ) -> list[Message]:
         """Get direct messages for a user with pagination support.
 
@@ -522,7 +582,7 @@ class ChatStorage:
 
             return [self._row_to_message(row) for row in rows]
 
-    def get_room_messages_count(self, since: Optional[datetime] = None) -> int:
+    def get_room_messages_count(self, since: datetime | None = None) -> int:
         """Get total count of room messages.
 
         Args:
@@ -544,7 +604,7 @@ class ChatStorage:
             cursor.execute(query, params)
             return cursor.fetchone()["count"]
 
-    def get_direct_messages_count(self, username: str, since: Optional[datetime] = None) -> int:
+    def get_direct_messages_count(self, username: str, since: datetime | None = None) -> int:
         """Get total count of direct messages for a user.
 
         Args:
@@ -584,6 +644,7 @@ class ChatStorage:
 
             return [
                 User(
+                    id=UUID(row["id"]) if "id" in row.keys() else uuid4(),
                     username=row["username"],
                     api_key=row["api_key"],
                     stytch_user_id=row["stytch_user_id"],
@@ -591,7 +652,9 @@ class ChatStorage:
                     webhook_url=HttpUrl(row["webhook_url"]) if row["webhook_url"] else None,
                     logo=row["logo"],
                     role=Role(row["role"]) if "role" in row.keys() else Role.MEMBER,
-                    created_by=row["created_by"] if "created_by" in row.keys() else None,
+                    created_by=UUID(row["created_by"])
+                    if ("created_by" in row.keys() and row["created_by"])
+                    else None,
                     viewer=bool(row["viewer"]),
                     admin=bool(row["admin"]),
                     bot=bool(row["bot"] if "bot" in row.keys() else 0),
@@ -614,6 +677,7 @@ class ChatStorage:
 
             return [
                 User(
+                    id=UUID(row["id"]) if "id" in row.keys() else uuid4(),
                     username=row["username"],
                     api_key=row["api_key"],
                     stytch_user_id=row["stytch_user_id"],
@@ -621,7 +685,9 @@ class ChatStorage:
                     webhook_url=HttpUrl(row["webhook_url"]) if row["webhook_url"] else None,
                     logo=row["logo"],
                     role=Role(row["role"]) if "role" in row.keys() else Role.MEMBER,
-                    created_by=row["created_by"] if "created_by" in row.keys() else None,
+                    created_by=UUID(row["created_by"])
+                    if ("created_by" in row.keys() and row["created_by"])
+                    else None,
                     viewer=bool(row["viewer"]),
                     admin=bool(row["admin"]),
                     bot=bool(row["bot"] if "bot" in row.keys() else 0),
@@ -640,16 +706,22 @@ class ChatStorage:
         Returns:
             List of bots created by this user
         """
+        # First get the creator's user ID
+        creator = self.get_user_by_username(creator_username)
+        if not creator:
+            return []
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT * FROM users WHERE role = 'bot' AND created_by = ? ORDER BY created_at ASC",
-                (creator_username,),
+                (str(creator.id),),
             )
             rows = cursor.fetchall()
 
             return [
                 User(
+                    id=UUID(row["id"]) if "id" in row.keys() else uuid4(),
                     username=row["username"],
                     api_key=row["api_key"],
                     stytch_user_id=row["stytch_user_id"],
@@ -657,7 +729,9 @@ class ChatStorage:
                     webhook_url=HttpUrl(row["webhook_url"]) if row["webhook_url"] else None,
                     logo=row["logo"],
                     role=Role(row["role"]) if "role" in row.keys() else Role.MEMBER,
-                    created_by=row["created_by"] if "created_by" in row.keys() else None,
+                    created_by=UUID(row["created_by"])
+                    if ("created_by" in row.keys() and row["created_by"])
+                    else None,
                     viewer=bool(row["viewer"]),
                     admin=bool(row["admin"]),
                     bot=bool(row["bot"] if "bot" in row.keys() else 0),
@@ -667,37 +741,37 @@ class ChatStorage:
                 for row in rows
             ]
 
-    def delete_user(self, username: str) -> bool:
+    def delete_user(self, user_id: UUID) -> bool:
         """Delete a user.
 
         Args:
-            username: Username to delete
+            user_id: User UUID to delete
 
         Returns:
             True if user was deleted, False if not found
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM users WHERE username = ?", (username,))
+            cursor.execute("DELETE FROM users WHERE id = ?", (str(user_id),))
             conn.commit()
             return cursor.rowcount > 0
 
     def admin_update_user(
         self,
-        username: str,
-        email: Optional[str] = None,
-        webhook_url: Optional[str] = None,
-        logo: Optional[str] = None,
-        role: Optional[Role] = None,
-        viewer: Optional[bool] = None,
-        admin: Optional[bool] = None,
-        bot: Optional[bool] = None,
-        emoji: Optional[str] = None,
+        user_id: UUID,
+        email: str | None = None,
+        webhook_url: str | None = None,
+        logo: str | None = None,
+        role: Role | None = None,
+        viewer: bool | None = None,
+        admin: bool | None = None,
+        bot: bool | None = None,
+        emoji: str | None = None,
     ) -> bool:
         """Admin-only: Update any user's profile fields.
 
         Args:
-            username: Username to update
+            user_id: User UUID to update
             email: New email (or None to skip)
             webhook_url: New webhook URL (or None to skip)
             logo: New logo (or None to skip)
@@ -725,7 +799,8 @@ class ChatStorage:
                 params.append(webhook_url)
             if logo is not None:
                 updates.append("logo = ?")
-                params.append(logo)
+                # Empty string means clear the logo (set to NULL)
+                params.append(None if logo == "" else logo)
             if role is not None:
                 # Update role and sync legacy fields
                 updates.append("role = ?")
@@ -763,14 +838,14 @@ class ChatStorage:
             if not updates:
                 return False
 
-            params.append(username)
-            query = f"UPDATE users SET {', '.join(updates)} WHERE username = ?"
+            params.append(str(user_id))
+            query = f"UPDATE users SET {', '.join(updates)} WHERE id = ?"
 
             cursor.execute(query, params)
             conn.commit()
             return cursor.rowcount > 0
 
-    def get_message_by_id(self, message_id: str) -> Optional[Message]:
+    def get_message_by_id(self, message_id: str) -> Message | None:
         """Get a message by its ID.
 
         Args:

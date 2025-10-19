@@ -1,12 +1,12 @@
 """Tests for WebSocket connection management."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from fastapi.testclient import TestClient
 
 from token_bowl_chat_server.models import Message, MessageType, User
 from token_bowl_chat_server.websocket import ConnectionManager, websocket_auth
-from token_bowl_chat_server.storage import storage
 
 
 @pytest.fixture
@@ -468,10 +468,12 @@ def test_websocket_direct_message_persists_to_database(
     with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as websocket:
         # Send a direct message via WebSocket
         test_message_content = "Direct message via WebSocket - should persist"
-        websocket.send_json({
-            "content": test_message_content,
-            "to_username": registered_user2["username"],
-        })
+        websocket.send_json(
+            {
+                "content": test_message_content,
+                "to_username": registered_user2["username"],
+            }
+        )
 
         # Receive confirmation
         response = websocket.receive_json()

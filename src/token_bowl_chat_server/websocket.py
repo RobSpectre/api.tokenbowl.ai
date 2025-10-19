@@ -1,10 +1,8 @@
 """WebSocket connection management for real-time messaging."""
 
-import json
 import logging
-from typing import Optional
 
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket
 
 from .auth import validate_api_key
 from .models import Message, MessageResponse, User
@@ -57,6 +55,7 @@ class ConnectionManager:
         try:
             # Fetch sender user info for display
             from .storage import storage
+
             from_user = storage.get_user_by_username(message.from_username)
             message_data = MessageResponse.from_message(message, from_user=from_user).model_dump()
             await websocket.send_json(message_data)
@@ -91,7 +90,7 @@ class ConnectionManager:
             return False
 
     async def broadcast_to_room(
-        self, message: Message, exclude_username: Optional[str] = None
+        self, message: Message, exclude_username: str | None = None
     ) -> None:
         """Broadcast a message to all connected users.
 
@@ -103,6 +102,7 @@ class ConnectionManager:
 
         # Fetch sender user info for display
         from .storage import storage
+
         from_user = storage.get_user_by_username(message.from_username)
         message_data = MessageResponse.from_message(message, from_user=from_user).model_dump()
 
@@ -145,7 +145,7 @@ class ConnectionManager:
 connection_manager = ConnectionManager()
 
 
-async def websocket_auth(websocket: WebSocket) -> Optional[User]:
+async def websocket_auth(websocket: WebSocket) -> User | None:
     """Authenticate a WebSocket connection.
 
     Supports dual authentication:
@@ -184,11 +184,12 @@ async def websocket_auth(websocket: WebSocket) -> Optional[User]:
 
         if stytch_user_id:
             from .storage import storage
+
             user = storage.get_user_by_stytch_id(stytch_user_id)
             if user:
                 return user
 
     # No valid authentication provided
-    logger.warning(f"[DEBUG] WebSocket authentication FAILED - closing connection")
+    logger.warning("[DEBUG] WebSocket authentication FAILED - closing connection")
     await websocket.close(code=1008, reason="Invalid or missing authentication credentials")
     return None
