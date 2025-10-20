@@ -87,15 +87,15 @@ async def register_user(registration: UserRegistration) -> UserRegistrationRespo
         )
 
     # Create user
+    # Note: Don't pass legacy boolean fields (viewer, admin, bot) here.
+    # The User model's sync_role_with_legacy_fields validator will set them
+    # based on the role we determined from registration.get_role()
     user = User(
         username=registration.username,
         api_key=api_key,
         webhook_url=registration.webhook_url,
         logo=registration.logo,
         role=role,
-        viewer=registration.viewer,
-        admin=registration.admin,
-        bot=registration.bot,
         emoji=registration.emoji,
     )
 
@@ -105,7 +105,7 @@ async def register_user(registration: UserRegistration) -> UserRegistrationRespo
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(e),
-        )
+        ) from e
 
     logger.info(f"Registered new user {user.username} with role {role.value}")
 
@@ -162,7 +162,7 @@ async def send_magic_link(request: StytchLoginRequest) -> StytchLoginResponse:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to send magic link",
-        )
+        ) from e
 
 
 @router.post("/auth/magic-link/authenticate", response_model=StytchAuthenticateResponse)
@@ -234,7 +234,7 @@ async def authenticate_magic_link(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired magic link token",
-        )
+        ) from e
 
 
 @router.post("/messages", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
@@ -337,7 +337,7 @@ async def get_messages(
     limit: int = 50,
     offset: int = 0,
     since: str | None = None,
-    current_user: User = Depends(get_current_user),
+    _current_user: User = Depends(get_current_user),
 ) -> PaginatedMessagesResponse:
     """Get recent room messages with pagination.
 
@@ -357,11 +357,11 @@ async def get_messages(
     if since:
         try:
             since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
-        except ValueError:
+        except ValueError as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid timestamp format. Use ISO 8601 format.",
-            )
+            ) from e
 
     # Get total count for pagination
     total = storage.get_room_messages_count(since=since_dt)
@@ -402,6 +402,9 @@ async def get_direct_messages(
 ) -> PaginatedMessagesResponse:
     """Get direct messages for the current user with pagination.
 
+    For viewer users, this returns ALL direct messages in the system.
+    For regular users, this returns only their own direct messages.
+
     Args:
         limit: Maximum number of messages to return (default: 50)
         offset: Number of messages to skip (default: 0)
@@ -418,18 +421,23 @@ async def get_direct_messages(
     if since:
         try:
             since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
-        except ValueError:
+        except ValueError as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid timestamp format. Use ISO 8601 format.",
-            )
+            ) from e
+
+    # Viewers see ALL direct messages, regular users see only their own
+    is_viewer = current_user.viewer
 
     # Get total count for pagination
-    total = storage.get_direct_messages_count(current_user.username, since=since_dt)
+    total = storage.get_direct_messages_count(
+        current_user.username, since=since_dt, is_viewer=is_viewer
+    )
 
     # Get messages with pagination
     messages = storage.get_direct_messages(
-        current_user.username, limit=limit, offset=offset, since=since_dt
+        current_user.username, limit=limit, offset=offset, since=since_dt, is_viewer=is_viewer
     )
 
     # Calculate if there are more messages
@@ -582,7 +590,7 @@ async def mark_all_messages_as_read(
 
 
 @router.get("/users", response_model=list[PublicUserProfile])
-async def get_users(current_user: User = Depends(get_current_user)) -> list[PublicUserProfile]:
+async def get_users(_current_user: User = Depends(get_current_user)) -> list[PublicUserProfile]:
     """Get list of all chat users (non-viewer users) with their display info.
 
     Viewer users are excluded from this list as they cannot receive messages.
@@ -610,7 +618,7 @@ async def get_users(current_user: User = Depends(get_current_user)) -> list[Publ
 
 @router.get("/users/online", response_model=list[PublicUserProfile])
 async def get_online_users(
-    current_user: User = Depends(get_current_user),
+    _current_user: User = Depends(get_current_user),
 ) -> list[PublicUserProfile]:
     """Get list of users currently connected via WebSocket with their display info.
 
@@ -764,7 +772,7 @@ async def update_my_username(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(e),
-        )
+        ) from e
 
     # Fetch updated user
     updated_user = storage.get_user_by_username(request.username)
@@ -832,7 +840,7 @@ async def regenerate_my_api_key(
 @router.get("/users/{user_id}", response_model=PublicUserProfile)
 async def get_user_profile(
     user_id: str,
-    current_user: User = Depends(get_current_user),
+    _current_user: User = Depends(get_current_user),
 ) -> PublicUserProfile:
     """Get public profile for a specific user.
 
@@ -851,11 +859,11 @@ async def get_user_profile(
     """
     try:
         user_uuid = UUID(user_id)
-    except ValueError:
+    except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid user ID format: {user_id}",
-        )
+        ) from e
 
     user = storage.get_user_by_id(user_uuid)
     if not user:
@@ -877,7 +885,7 @@ async def get_user_profile(
 
 @router.get("/admin/users", response_model=list[UserProfileResponse])
 async def admin_get_all_users(
-    admin_user: User = Depends(get_current_admin),
+    _admin_user: User = Depends(get_current_admin),
 ) -> list[UserProfileResponse]:
     """Admin: Get all users with full profile information.
 
@@ -910,7 +918,7 @@ async def admin_get_all_users(
 @router.get("/admin/users/{user_id}", response_model=UserProfileResponse)
 async def admin_get_user(
     user_id: str,
-    admin_user: User = Depends(get_current_admin),
+    _admin_user: User = Depends(get_current_admin),
 ) -> UserProfileResponse:
     """Admin: Get a specific user's full profile.
 
@@ -926,11 +934,11 @@ async def admin_get_user(
     """
     try:
         user_uuid = UUID(user_id)
-    except ValueError:
+    except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid user ID format: {user_id}",
-        )
+        ) from e
 
     user = storage.get_user_by_id(user_uuid)
     if not user:
@@ -976,11 +984,11 @@ async def admin_update_user(
     """
     try:
         user_uuid = UUID(user_id)
-    except ValueError:
+    except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid user ID format: {user_id}",
-        )
+        ) from e
 
     # First check if user exists
     user = storage.get_user_by_id(user_uuid)
@@ -1036,7 +1044,7 @@ async def admin_update_user(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(e),
-        )
+        ) from e
 
     if not success:
         raise HTTPException(
@@ -1086,11 +1094,11 @@ async def admin_delete_user(
     """
     try:
         user_uuid = UUID(user_id)
-    except ValueError:
+    except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid user ID format: {user_id}",
-        )
+        ) from e
 
     # Get user first to log username
     user = storage.get_user_by_id(user_uuid)
@@ -1113,7 +1121,7 @@ async def admin_delete_user(
 @router.get("/admin/messages/{message_id}", response_model=MessageResponse)
 async def admin_get_message(
     message_id: str,
-    admin_user: User = Depends(get_current_admin),
+    _admin_user: User = Depends(get_current_admin),
 ) -> MessageResponse:
     """Admin: Get a specific message by ID.
 
@@ -1247,7 +1255,7 @@ async def create_bot(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(e),
-        )
+        ) from e
 
     logger.info(f"User {current_user.username} created bot {bot.username}")
 
@@ -1321,11 +1329,11 @@ async def update_bot(
     """
     try:
         bot_uuid = UUID(bot_id)
-    except ValueError:
+    except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid bot ID format: {bot_id}",
-        )
+        ) from e
 
     # Get the bot
     bot = storage.get_user_by_id(bot_uuid)
@@ -1397,11 +1405,11 @@ async def delete_bot(
     """
     try:
         bot_uuid = UUID(bot_id)
-    except ValueError:
+    except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid bot ID format: {bot_id}",
-        )
+        ) from e
 
     # Get the bot
     bot = storage.get_user_by_id(bot_uuid)
@@ -1451,11 +1459,11 @@ async def regenerate_bot_api_key(
     """
     try:
         bot_uuid = UUID(bot_id)
-    except ValueError:
+    except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid bot ID format: {bot_id}",
-        )
+        ) from e
 
     # Get the bot
     bot = storage.get_user_by_id(bot_uuid)
@@ -1515,11 +1523,11 @@ async def assign_user_role(
     """
     try:
         user_uuid = UUID(user_id)
-    except ValueError:
+    except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid user ID format: {user_id}",
-        )
+        ) from e
 
     # Verify user exists
     user = storage.get_user_by_id(user_uuid)
@@ -1605,7 +1613,7 @@ async def invite_user_by_email(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to send invitation: {str(e)}",
-        )
+        ) from e
 
 
 @router.websocket("/ws")
@@ -1716,7 +1724,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
                 logger.info(
                     f"WebSocket message from {user.username} to "
-                    f"{'room' if not to_username else to_username}"
+                    f"{to_username if to_username else 'room'}"
                 )
 
                 # Deliver message
@@ -1739,7 +1747,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
                 else:
                     # Direct message
-                    recipient = storage.get_user_by_username(to_username)  # type: ignore
+                    recipient = storage.get_user_by_username(to_username)
                     if recipient:
                         sent_via_ws = await connection_manager.send_message(
                             recipient.username, message
@@ -1770,12 +1778,14 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     continue
 
                 # Verify message exists
-                message = storage.get_message_by_id(message_id)
-                if not message:
+                message_result = storage.get_message_by_id(message_id)
+                if not message_result:
                     await websocket.send_json(
                         {"type": "error", "error": f"Message {message_id} not found"}
                     )
                     continue
+
+                message = message_result  # Type narrowing: now message is guaranteed to be Message
 
                 # Mark as read
                 was_created = storage.mark_message_as_read(message_id, user.username)

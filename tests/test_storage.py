@@ -266,6 +266,7 @@ def test_delete_user():
 def test_delete_nonexistent_user():
     """Test deleting a nonexistent user."""
     from uuid import UUID
+
     storage = ChatStorage(db_path=":memory:")
 
     # Use a fake UUID for non-existent user

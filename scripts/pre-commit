@@ -1,0 +1,55 @@
+#!/bin/bash
+
+# Pre-commit hook to run the same CI checks locally
+# This ensures code passes CI before pushing
+
+set -e
+
+echo "Running pre-commit CI checks..."
+echo ""
+
+# Activate virtual environment
+if [ ! -d ".venv" ]; then
+    echo "❌ Error: Virtual environment not found. Run 'uv venv' first."
+    exit 1
+fi
+
+source .venv/bin/activate
+
+# 1. Run linting
+echo "→ Running linting (ruff check)..."
+if ! ruff check .; then
+    echo "❌ Linting failed. Fix the issues above."
+    exit 1
+fi
+echo "✅ Linting passed"
+echo ""
+
+# 2. Run formatting check
+echo "→ Checking code formatting (ruff format)..."
+if ! ruff format --check .; then
+    echo "❌ Formatting check failed. Run 'ruff format .' to fix."
+    exit 1
+fi
+echo "✅ Formatting check passed"
+echo ""
+
+# 3. Run type checking
+echo "→ Running type checking (mypy)..."
+if ! mypy src; then
+    echo "❌ Type checking failed. Fix the issues above."
+    exit 1
+fi
+echo "✅ Type checking passed"
+echo ""
+
+# 4. Run tests
+echo "→ Running tests (pytest)..."
+if ! pytest --cov --cov-report=term; then
+    echo "❌ Tests failed. Fix the issues above."
+    exit 1
+fi
+echo "✅ Tests passed"
+echo ""
+
+echo "✅ All pre-commit checks passed!"

@@ -232,7 +232,7 @@ class ChatStorage:
                 viewer=bool(row["viewer"]),
                 admin=bool(row["admin"]),
                 bot=bool(row["bot"] if "bot" in row.keys() else 0),
-                emoji=row["emoji"] if "emoji" in row.keys() else None,
+                emoji=row["emoji"] if ("emoji" in row.keys() and row["emoji"]) else None,
                 created_at=datetime.fromisoformat(row["created_at"]),
             )
 
@@ -268,7 +268,7 @@ class ChatStorage:
                 viewer=bool(row["viewer"]),
                 admin=bool(row["admin"]),
                 bot=bool(row["bot"] if "bot" in row.keys() else 0),
-                emoji=row["emoji"] if "emoji" in row.keys() else None,
+                emoji=row["emoji"] if ("emoji" in row.keys() and row["emoji"]) else None,
                 created_at=datetime.fromisoformat(row["created_at"]),
             )
 
@@ -304,7 +304,7 @@ class ChatStorage:
                 viewer=bool(row["viewer"]),
                 admin=bool(row["admin"]),
                 bot=bool(row["bot"] if "bot" in row.keys() else 0),
-                emoji=row["emoji"] if "emoji" in row.keys() else None,
+                emoji=row["emoji"] if ("emoji" in row.keys() and row["emoji"]) else None,
                 created_at=datetime.fromisoformat(row["created_at"]),
             )
 
@@ -340,7 +340,7 @@ class ChatStorage:
                 viewer=bool(row["viewer"]),
                 admin=bool(row["admin"]),
                 bot=bool(row["bot"] if "bot" in row.keys() else 0),
-                emoji=row["emoji"] if "emoji" in row.keys() else None,
+                emoji=row["emoji"] if ("emoji" in row.keys() and row["emoji"]) else None,
                 created_at=datetime.fromisoformat(row["created_at"]),
             )
 
@@ -390,9 +390,7 @@ class ChatStorage:
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE users SET api_key = ? WHERE id = ?", (new_api_key, str(user_id))
-            )
+            cursor.execute("UPDATE users SET api_key = ? WHERE id = ?", (new_api_key, str(user_id)))
             conn.commit()
             return cursor.rowcount > 0
 
@@ -547,7 +545,12 @@ class ChatStorage:
             return [self._row_to_message(row) for row in rows]
 
     def get_direct_messages(
-        self, username: str, limit: int = 50, offset: int = 0, since: datetime | None = None
+        self,
+        username: str,
+        limit: int = 50,
+        offset: int = 0,
+        since: datetime | None = None,
+        is_viewer: bool = False,
     ) -> list[Message]:
         """Get direct messages for a user with pagination support.
 
@@ -556,19 +559,30 @@ class ChatStorage:
             limit: Maximum number of messages to return
             offset: Number of messages to skip from the start
             since: Only return messages after this timestamp
+            is_viewer: If True, returns ALL direct messages (for viewer users)
 
         Returns:
-            List of direct messages
+            List of direct messages (all DMs if viewer, user's DMs otherwise)
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
 
-            query = """
-                SELECT * FROM messages
-                WHERE to_username IS NOT NULL
-                AND (to_username = ? OR from_username = ?)
-            """
-            params: list = [username, username]
+            params: list
+            if is_viewer:
+                # Viewers see ALL direct messages
+                query = """
+                    SELECT * FROM messages
+                    WHERE to_username IS NOT NULL
+                """
+                params = []
+            else:
+                # Regular users see only their own direct messages
+                query = """
+                    SELECT * FROM messages
+                    WHERE to_username IS NOT NULL
+                    AND (to_username = ? OR from_username = ?)
+                """
+                params = [username, username]
 
             if since:
                 query += " AND timestamp > ?"
@@ -602,34 +616,49 @@ class ChatStorage:
                 params.append(since.isoformat())
 
             cursor.execute(query, params)
-            return cursor.fetchone()["count"]
+            result = cursor.fetchone()
+            return int(result["count"]) if result else 0
 
-    def get_direct_messages_count(self, username: str, since: datetime | None = None) -> int:
+    def get_direct_messages_count(
+        self, username: str, since: datetime | None = None, is_viewer: bool = False
+    ) -> int:
         """Get total count of direct messages for a user.
 
         Args:
             username: Username to count messages for
             since: Only count messages after this timestamp
+            is_viewer: If True, counts ALL direct messages (for viewer users)
 
         Returns:
-            Total count of direct messages
+            Total count of direct messages (all DMs if viewer, user's DMs otherwise)
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
 
-            query = """
-                SELECT COUNT(*) as count FROM messages
-                WHERE to_username IS NOT NULL
-                AND (to_username = ? OR from_username = ?)
-            """
-            params: list = [username, username]
+            params: list
+            if is_viewer:
+                # Viewers see ALL direct messages
+                query = """
+                    SELECT COUNT(*) as count FROM messages
+                    WHERE to_username IS NOT NULL
+                """
+                params = []
+            else:
+                # Regular users see only their own direct messages
+                query = """
+                    SELECT COUNT(*) as count FROM messages
+                    WHERE to_username IS NOT NULL
+                    AND (to_username = ? OR from_username = ?)
+                """
+                params = [username, username]
 
             if since:
                 query += " AND timestamp > ?"
                 params.append(since.isoformat())
 
             cursor.execute(query, params)
-            return cursor.fetchone()["count"]
+            result = cursor.fetchone()
+            return int(result["count"]) if result else 0
 
     def get_all_users(self) -> list[User]:
         """Get all registered users.
@@ -658,7 +687,7 @@ class ChatStorage:
                     viewer=bool(row["viewer"]),
                     admin=bool(row["admin"]),
                     bot=bool(row["bot"] if "bot" in row.keys() else 0),
-                    emoji=row["emoji"] if "emoji" in row.keys() else None,
+                    emoji=row["emoji"] if ("emoji" in row.keys() and row["emoji"]) else None,
                     created_at=datetime.fromisoformat(row["created_at"]),
                 )
                 for row in rows
@@ -691,7 +720,7 @@ class ChatStorage:
                     viewer=bool(row["viewer"]),
                     admin=bool(row["admin"]),
                     bot=bool(row["bot"] if "bot" in row.keys() else 0),
-                    emoji=row["emoji"] if "emoji" in row.keys() else None,
+                    emoji=row["emoji"] if ("emoji" in row.keys() and row["emoji"]) else None,
                     created_at=datetime.fromisoformat(row["created_at"]),
                 )
                 for row in rows
@@ -735,7 +764,7 @@ class ChatStorage:
                     viewer=bool(row["viewer"]),
                     admin=bool(row["admin"]),
                     bot=bool(row["bot"] if "bot" in row.keys() else 0),
-                    emoji=row["emoji"] if "emoji" in row.keys() else None,
+                    emoji=row["emoji"] if ("emoji" in row.keys() and row["emoji"]) else None,
                     created_at=datetime.fromisoformat(row["created_at"]),
                 )
                 for row in rows
@@ -801,7 +830,7 @@ class ChatStorage:
 
             # Build update query dynamically
             updates = []
-            params = []
+            params: list[str | int | None] = []
 
             if username is not None:
                 updates.append("username = ?")

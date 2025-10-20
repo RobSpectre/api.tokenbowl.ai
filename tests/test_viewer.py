@@ -192,16 +192,95 @@ def test_viewer_receives_websocket_broadcasts(client, registered_user):
     viewer_api_key = response.json()["api_key"]
 
     # Connect viewer via WebSocket
-    with client.websocket_connect(f"/ws?api_key={viewer_api_key}") as viewer_ws:
+    with (
+        client.websocket_connect(f"/ws?api_key={viewer_api_key}") as viewer_ws,
+        client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as user_ws,
+    ):
         # Regular user sends a room message
-        with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as user_ws:
-            user_ws.send_json({"content": "Room message"})
+        user_ws.send_json({"content": "Room message"})
 
-            # User gets confirmation
-            user_data = user_ws.receive_json()
-            assert user_data["status"] == "sent"
+        # User gets confirmation
+        user_data = user_ws.receive_json()
+        assert user_data["status"] == "sent"
 
-            # Viewer should receive the broadcast
-            viewer_data = viewer_ws.receive_json()
-            assert viewer_data["content"] == "Room message"
-            assert viewer_data["from_username"] == registered_user["username"]
+        # Viewer should receive the broadcast
+        viewer_data = viewer_ws.receive_json()
+        assert viewer_data["content"] == "Room message"
+        assert viewer_data["from_username"] == registered_user["username"]
+
+
+def test_viewer_can_see_all_direct_messages(client, registered_user, registered_user2):
+    """Test that viewers can see ALL direct messages between users."""
+    # Register a viewer
+    response = client.post(
+        "/register",
+        json={"username": "viewer_user", "viewer": True},
+    )
+    viewer_api_key = response.json()["api_key"]
+    viewer_headers = {"X-API-Key": viewer_api_key}
+
+    # User 1 sends a direct message to User 2
+    headers1 = {"X-API-Key": registered_user["api_key"]}
+    response = client.post(
+        "/messages",
+        json={"content": "Secret message to user2", "to_username": registered_user2["username"]},
+        headers=headers1,
+    )
+    assert response.status_code == 201
+
+    # User 2 sends a direct message to User 1
+    headers2 = {"X-API-Key": registered_user2["api_key"]}
+    response = client.post(
+        "/messages",
+        json={"content": "Reply from user2", "to_username": registered_user["username"]},
+        headers=headers2,
+    )
+    assert response.status_code == 201
+
+    # Viewer should be able to see ALL direct messages
+    response = client.get("/messages/direct", headers=viewer_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["pagination"]["total"] == 2  # Should see both DMs
+
+    messages = data["messages"]
+    assert len(messages) == 2
+
+    # Verify viewer can see both messages
+    contents = [msg["content"] for msg in messages]
+    assert "Secret message to user2" in contents
+    assert "Reply from user2" in contents
+
+    # Regular user 1 should only see their own DMs (both messages involve them)
+    response = client.get("/messages/direct", headers=headers1)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["pagination"]["total"] == 2  # Both messages involve user1
+
+    # Create a third user and have them exchange messages with user2
+    response = client.post(
+        "/register",
+        json={"username": "user3"},
+    )
+    user3_api_key = response.json()["api_key"]
+    headers3 = {"X-API-Key": user3_api_key}
+
+    # User 3 sends DM to User 2
+    response = client.post(
+        "/messages",
+        json={"content": "Message from user3", "to_username": registered_user2["username"]},
+        headers=headers3,
+    )
+    assert response.status_code == 201
+
+    # Viewer should now see 3 total DMs
+    response = client.get("/messages/direct", headers=viewer_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["pagination"]["total"] == 3
+
+    # User 1 should still only see their 2 DMs (doesn't see user3-user2 conversation)
+    response = client.get("/messages/direct", headers=headers1)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["pagination"]["total"] == 2

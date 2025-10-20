@@ -394,56 +394,59 @@ def test_websocket_nonexistent_recipient(client, registered_user):
 def test_websocket_receive_room_message(client, registered_user, registered_user2):
     """Test receiving room messages via WebSocket."""
     # Connect both users via WebSocket
-    with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as ws1:
-        with client.websocket_connect(f"/ws?api_key={registered_user2['api_key']}") as ws2:
-            # User 1 sends a room message
-            ws1.send_json({"content": "Broadcast message"})
+    with (
+        client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as ws1,
+        client.websocket_connect(f"/ws?api_key={registered_user2['api_key']}") as ws2,
+    ):
+        # User 1 sends a room message
+        ws1.send_json({"content": "Broadcast message"})
 
-            # User 1 gets confirmation
-            data1 = ws1.receive_json()
-            assert data1["status"] == "sent"
+        # User 1 gets confirmation
+        data1 = ws1.receive_json()
+        assert data1["status"] == "sent"
 
-            # User 2 should receive the message
-            data2 = ws2.receive_json()
-            assert data2["content"] == "Broadcast message"
-            assert data2["from_username"] == "test_user"
-            assert data2["message_type"] == "room"
+        # User 2 should receive the message
+        data2 = ws2.receive_json()
+        assert data2["content"] == "Broadcast message"
+        assert data2["from_username"] == "test_user"
+        assert data2["message_type"] == "room"
 
 
 def test_websocket_receive_direct_message(client, registered_user, registered_user2):
     """Test receiving direct messages via WebSocket."""
     # Connect both users via WebSocket
-    with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as ws1:
-        with client.websocket_connect(f"/ws?api_key={registered_user2['api_key']}") as ws2:
-            # User 1 sends a direct message to user 2
-            ws1.send_json({"content": "Direct WebSocket message", "to_username": "test_user2"})
+    with (
+        client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as ws1,
+        client.websocket_connect(f"/ws?api_key={registered_user2['api_key']}") as ws2,
+    ):
+        # User 1 sends a direct message to user 2
+        ws1.send_json({"content": "Direct WebSocket message", "to_username": "test_user2"})
 
-            # User 1 gets confirmation
-            data1 = ws1.receive_json()
-            assert data1["status"] == "sent"
+        # User 1 gets confirmation
+        data1 = ws1.receive_json()
+        assert data1["status"] == "sent"
 
-            # User 2 should receive the message
-            data2 = ws2.receive_json()
-            assert data2["content"] == "Direct WebSocket message"
-            assert data2["from_username"] == "test_user"
-            assert data2["to_username"] == "test_user2"
-            assert data2["message_type"] == "direct"
+        # User 2 should receive the message
+        data2 = ws2.receive_json()
+        assert data2["content"] == "Direct WebSocket message"
+        assert data2["from_username"] == "test_user"
+        assert data2["to_username"] == "test_user2"
+        assert data2["message_type"] == "direct"
 
 
 def test_websocket_invalid_api_key(client):
     """Test WebSocket connection with invalid API key."""
     from fastapi import WebSocketDisconnect
 
-    with pytest.raises(WebSocketDisconnect):
-        with client.websocket_connect("/ws?api_key=invalid_key") as websocket:
-            pass
+    with pytest.raises(WebSocketDisconnect), client.websocket_connect("/ws?api_key=invalid_key"):
+        pass
 
 
 def test_websocket_missing_api_key(client):
     """Test WebSocket connection without API key."""
     from fastapi import WebSocketDisconnect
 
-    with pytest.raises(WebSocketDisconnect), client.websocket_connect("/ws") as websocket:
+    with pytest.raises(WebSocketDisconnect), client.websocket_connect("/ws"):
         pass
 
 
@@ -1345,28 +1348,30 @@ def test_websocket_get_users(client, registered_user, registered_user2):
 def test_websocket_get_online_users(client, registered_user, registered_user2):
     """Test getting online users via WebSocket."""
     # Connect user2 via WebSocket
-    with client.websocket_connect(f"/ws?api_key={registered_user2['api_key']}") as ws2:
+    with (
+        client.websocket_connect(f"/ws?api_key={registered_user2['api_key']}"),
+        client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as ws1,
+    ):
         # User1 requests online users
-        with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as ws1:
-            ws1.send_json({"type": "get_online_users"})
+        ws1.send_json({"type": "get_online_users"})
 
-            data = ws1.receive_json()
-            assert data["type"] == "online_users"
-            assert "users" in data
-            assert isinstance(data["users"], list)
+        data = ws1.receive_json()
+        assert data["type"] == "online_users"
+        assert "users" in data
+        assert isinstance(data["users"], list)
 
-            # Both users should be online
-            usernames = [user["username"] for user in data["users"]]
-            assert "test_user" in usernames
-            assert "test_user2" in usernames
+        # Both users should be online
+        usernames = [user["username"] for user in data["users"]]
+        assert "test_user" in usernames
+        assert "test_user2" in usernames
 
-            # Verify structure
-            for user in data["users"]:
-                assert "username" in user
-                assert "logo" in user
-                assert "emoji" in user
-                assert "bot" in user
-                assert "viewer" in user
+        # Verify structure
+        for user in data["users"]:
+            assert "username" in user
+            assert "logo" in user
+            assert "emoji" in user
+            assert "bot" in user
+            assert "viewer" in user
 
 
 def test_websocket_get_user_profile(client, registered_user, registered_user2):

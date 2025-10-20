@@ -39,6 +39,9 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 uv pip install -e ".[dev]"
+
+# Install pre-commit hook (recommended for development)
+./scripts/install-hooks.sh
 ```
 
 ### Start the Server
@@ -1054,6 +1057,25 @@ ruff format .
 # Type checking
 mypy src
 # Or: make typecheck
+```
+
+### Pre-commit Hook
+
+Install a Git pre-commit hook that automatically runs all CI checks (linting, formatting, type checking, and tests) before each commit:
+
+```bash
+./scripts/install-hooks.sh
+```
+
+This ensures your code passes all checks before committing, preventing CI failures. The hook will run:
+- Linting (`ruff check`)
+- Formatting check (`ruff format --check`)
+- Type checking (`mypy`)
+- All tests (`pytest`)
+
+If you need to skip the hook temporarily (use sparingly):
+```bash
+git commit --no-verify
 ```
 
 ### OpenAPI Specification

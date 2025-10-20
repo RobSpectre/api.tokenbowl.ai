@@ -23,7 +23,7 @@ def export_openapi_spec():
         json.dump(openapi_schema, f, indent=2)
 
     print(f"OpenAPI specification exported to: {output_path}")
-    print(f"Total endpoints: {len([p for p in openapi_schema.get('paths', {}).values()])}")
+    print(f"Total endpoints: {len(list(openapi_schema.get('paths', {}).values()))}")
 
 
 if __name__ == "__main__":

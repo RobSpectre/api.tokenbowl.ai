@@ -189,6 +189,8 @@ async def websocket_auth(websocket: WebSocket) -> User | None:
 
     # No valid authentication provided
     client_host = websocket.client.host if websocket.client else "unknown"
-    logger.warning(f"WebSocket AUTH FAILED - client: {client_host} - Invalid or missing credentials")
+    logger.warning(
+        f"WebSocket AUTH FAILED - client: {client_host} - Invalid or missing credentials"
+    )
     await websocket.close(code=1008, reason="Invalid or missing authentication credentials")
     return None

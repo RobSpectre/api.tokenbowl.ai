@@ -1,5 +1,7 @@
 """Data models for the chat server."""
 
+from __future__ import annotations
+
 from datetime import UTC, datetime
 from enum import Enum
 from uuid import UUID, uuid4
@@ -150,7 +152,7 @@ class User(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def sync_role_with_legacy_fields(self) -> "User":
+    def sync_role_with_legacy_fields(self) -> User:
         """Ensure role is consistent with legacy boolean fields.
 
         This maintains backward compatibility while transitioning to role-based auth.
@@ -234,7 +236,7 @@ class UserRegistration(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def validate_bot_cannot_have_logo(self):
+    def validate_bot_cannot_have_logo(self) -> UserRegistration:
         """Validate that bots cannot have logos."""
         if self.bot and self.logo is not None:
             raise ValueError("Bots can only use emoji for avatars, not logos")
@@ -297,7 +299,7 @@ class MessageResponse(BaseModel):
     @classmethod
     def from_message(
         cls, message: Message, from_user: User | None = None, to_user: User | None = None
-    ) -> "MessageResponse":
+    ) -> MessageResponse:
         """Create MessageResponse from Message.
 
         Args:
@@ -450,7 +452,7 @@ class AdminUpdateUserRequest(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def validate_bot_cannot_have_logo(self):
+    def validate_bot_cannot_have_logo(self) -> AdminUpdateUserRequest:
         """Validate that bots cannot have logos."""
         if self.bot is True and self.logo is not None:
             raise ValueError("Bots can only use emoji for avatars, not logos")

@@ -16,15 +16,17 @@ async def test_lifespan_startup_and_shutdown():
     app = create_app()
 
     # Mock webhook_delivery start and stop methods
-    with patch.object(webhook.webhook_delivery, "start", new_callable=AsyncMock) as mock_start:
-        with patch.object(webhook.webhook_delivery, "stop", new_callable=AsyncMock) as mock_stop:
-            # Enter the lifespan context
-            async with lifespan(app):
-                # Verify start was called
-                mock_start.assert_called_once()
+    with (
+        patch.object(webhook.webhook_delivery, "start", new_callable=AsyncMock) as mock_start,
+        patch.object(webhook.webhook_delivery, "stop", new_callable=AsyncMock) as mock_stop,
+    ):
+        # Enter the lifespan context
+        async with lifespan(app):
+            # Verify start was called
+            mock_start.assert_called_once()
 
-            # After exiting context, verify stop was called
-            mock_stop.assert_called_once()
+        # After exiting context, verify stop was called
+        mock_stop.assert_called_once()
 
 
 @pytest.mark.asyncio

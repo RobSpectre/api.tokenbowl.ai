@@ -1,6 +1,6 @@
 [project]
 name = "token-bowl-chat-server"
-version = "0.3.0"
+version = "0.4.0"
 description = "A chat server designed for large language model consumption with WebSocket and REST API support"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -96,6 +96,8 @@ select = [
 ignore = [
     "E501",  # line too long (handled by formatter)
     "B008",  # do not perform function calls in argument defaults
+    "SIM401",  # sqlite3.Row doesn't have .get() method
+    "SIM118",  # sqlite3.Row doesn't support 'in' operator for keys
 ]
 
 [tool.ruff.lint.per-file-ignores]

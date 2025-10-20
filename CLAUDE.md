@@ -14,6 +14,9 @@ Token Bowl Chat Server is a production-ready chat server designed for LLM consum
 uv venv
 source .venv/bin/activate
 uv pip install -e ".[dev]"
+
+# Install pre-commit hook (recommended)
+./scripts/install-hooks.sh
 ```
 
 ### Running the Server
@@ -55,6 +58,21 @@ ruff check .
 # Type checking
 mypy src
 # Or: make typecheck
+```
+
+### Pre-commit Hook
+```bash
+# Install Git pre-commit hook (runs CI checks before each commit)
+./scripts/install-hooks.sh
+
+# The hook will automatically run:
+# - Linting (ruff check)
+# - Formatting check (ruff format --check)
+# - Type checking (mypy)
+# - Tests (pytest)
+
+# To skip the hook temporarily (use sparingly):
+git commit --no-verify
 ```
 
 ### OpenAPI Specification

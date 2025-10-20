@@ -33,7 +33,7 @@ class StytchClient:
                 self._client = stytch.Client(
                     project_id=settings.stytch_project_id,
                     secret=settings.stytch_secret,
-                    environment=env,  # type: ignore
+                    environment=env,
                 )
                 logger.info(f"Stytch client initialized successfully in {env} mode")
             except Exception as e:
@@ -64,7 +64,7 @@ class StytchClient:
 
         try:
             # Use async method in SDK v6+
-            response = await self._client.magic_links.email.login_or_create_async(
+            await self._client.magic_links.email.login_or_create_async(
                 email=email,
                 login_magic_link_url=signup_magic_link_url,
                 signup_magic_link_url=signup_magic_link_url,
@@ -122,7 +122,7 @@ class StytchClient:
         try:
             # Use async method in SDK v6+
             response = await self._client.sessions.authenticate_async(session_token=session_token)
-            return response.user_id
+            return response.user_id  # type: ignore[attr-defined, no-any-return]
         except StytchError as e:
             logger.debug(f"Session validation failed: {e}")
             return None
