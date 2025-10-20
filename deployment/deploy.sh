@@ -4,7 +4,7 @@ set -e
 echo "🚀 Starting deployment..."
 
 # Configuration
-APP_DIR="/opt/token-bowl-chat-server"
+APP_DIR="/opt/api.tokenbowl.ai"
 SERVICE_NAME="token-bowl-chat"
 
 # Navigate to app directory
@@ -23,17 +23,17 @@ uv pip install -e .
 
 # Restart the service
 echo "🔄 Restarting service..."
-sudo systemctl restart "$SERVICE_NAME"
+sudo supervisorctl restart "$SERVICE_NAME"
 
 # Wait a moment for service to start
 sleep 2
 
 # Check service status
-if sudo systemctl is-active --quiet "$SERVICE_NAME"; then
+if sudo supervisorctl status "$SERVICE_NAME" | grep -q "RUNNING"; then
     echo "✅ Service restarted successfully"
 else
     echo "❌ Service failed to start"
-    sudo systemctl status "$SERVICE_NAME" --no-pager
+    sudo supervisorctl status "$SERVICE_NAME"
     exit 1
 fi
 

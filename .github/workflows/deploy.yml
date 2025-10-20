@@ -16,13 +16,13 @@ jobs:
 
       - name: Pull latest release
         run: |
-          cd /opt/token-bowl-chat-server
+          cd /opt/api.tokenbowl.ai
           git fetch --all --tags
           git checkout ${{ github.ref_name }}
 
       - name: Run deployment script
         run: |
-          cd /opt/token-bowl-chat-server
+          cd /opt/api.tokenbowl.ai
           bash deployment/deploy.sh
 
       - name: Verify deployment
@@ -31,7 +31,7 @@ jobs:
           sleep 5
 
           # Check if service is running
-          sudo systemctl is-active --quiet token-bowl-chat && echo "✅ Service is running" || exit 1
+          sudo supervisorctl status token-bowl-chat | grep -q "RUNNING" && echo "✅ Service is running" || exit 1
 
           # Check health endpoint
           curl -f http://localhost:8000/health || exit 1
