@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     stytch_secret: str | None = None
     stytch_environment: str = "test"  # 'test' or 'live'
 
+    # Frontend URL for magic link redirects
+    frontend_url: str = "http://localhost:3000"
+
     @property
     def stytch_enabled(self) -> bool:
         """Check if Stytch is configured and enabled."""

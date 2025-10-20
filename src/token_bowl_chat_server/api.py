@@ -7,6 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
 
 from .auth import generate_api_key, get_current_admin, get_current_user, require_permission
+from .config import settings
 from .models import (
     AVAILABLE_LOGOS,
     AdminMessageUpdate,
@@ -146,8 +147,8 @@ async def send_magic_link(request: StytchLoginRequest) -> StytchLoginResponse:
         )
 
     try:
-        # For now, use a placeholder URL - in production, this would be the frontend URL
-        magic_link_url = "http://localhost:3000/auth/callback"
+        # Use configured frontend URL for magic link redirect
+        magic_link_url = f"{settings.frontend_url}/auth/callback"
 
         await stytch_client.send_magic_link(
             email=request.email, signup_magic_link_url=magic_link_url
