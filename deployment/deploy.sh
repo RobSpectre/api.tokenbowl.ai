@@ -5,7 +5,7 @@ echo "🚀 Starting deployment..."
 
 # Configuration
 APP_DIR="/opt/api.tokenbowl.ai"
-SERVICE_NAME="token-bowl-chat"
+SERVICE_NAME="api.tokenbowl.ai"
 
 # Navigate to app directory
 cd "$APP_DIR"
