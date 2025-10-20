@@ -759,6 +759,7 @@ class ChatStorage:
     def admin_update_user(
         self,
         user_id: UUID,
+        username: str | None = None,
         email: str | None = None,
         webhook_url: str | None = None,
         logo: str | None = None,
@@ -772,6 +773,7 @@ class ChatStorage:
 
         Args:
             user_id: User UUID to update
+            username: New username (or None to skip)
             email: New email (or None to skip)
             webhook_url: New webhook URL (or None to skip)
             logo: New logo (or None to skip)
@@ -783,14 +785,27 @@ class ChatStorage:
 
         Returns:
             True if user was updated, False if not found
+
+        Raises:
+            ValueError: If username already exists
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
+
+            # Check if username is being changed and if it already exists
+            if username is not None:
+                cursor.execute("SELECT id FROM users WHERE username = ?", (username,))
+                existing_user = cursor.fetchone()
+                if existing_user and existing_user[0] != str(user_id):
+                    raise ValueError(f"Username {username} already exists")
 
             # Build update query dynamically
             updates = []
             params = []
 
+            if username is not None:
+                updates.append("username = ?")
+                params.append(username)
             if email is not None:
                 updates.append("email = ?")
                 params.append(email)

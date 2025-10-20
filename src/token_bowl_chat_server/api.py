@@ -990,6 +990,26 @@ async def admin_update_user(
             detail=f"User {user_id} not found",
         )
 
+    # Check if at least one field is being updated
+    has_updates = any(
+        [
+            update_request.username is not None,
+            update_request.email is not None,
+            update_request.webhook_url is not None,
+            update_request.logo is not None,
+            update_request.viewer is not None,
+            update_request.admin is not None,
+            update_request.bot is not None,
+            update_request.emoji is not None,
+        ]
+    )
+
+    if not has_updates:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No valid fields provided to update. Valid fields: username, email, webhook_url, logo, viewer, admin, bot, emoji",
+        )
+
     # Determine logo value - if setting bot=true and user has a logo, we must clear it
     # We need to explicitly pass a value to update, not None (which means "don't update")
     logo_to_update = update_request.logo
@@ -1000,16 +1020,23 @@ async def admin_update_user(
         logger.info(f"Cleared logo for {user.username} when setting bot=true")
 
     # Update user
-    success = storage.admin_update_user(
-        user_id=user_uuid,
-        email=update_request.email,
-        webhook_url=str(update_request.webhook_url) if update_request.webhook_url else None,
-        logo=logo_to_update,  # Empty string will be converted to None in storage
-        viewer=update_request.viewer,
-        admin=update_request.admin,
-        bot=update_request.bot,
-        emoji=update_request.emoji,
-    )
+    try:
+        success = storage.admin_update_user(
+            user_id=user_uuid,
+            username=update_request.username,
+            email=update_request.email,
+            webhook_url=str(update_request.webhook_url) if update_request.webhook_url else None,
+            logo=logo_to_update,  # Empty string will be converted to None in storage
+            viewer=update_request.viewer,
+            admin=update_request.admin,
+            bot=update_request.bot,
+            emoji=update_request.emoji,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        )
 
     if not success:
         raise HTTPException(
@@ -1619,7 +1646,6 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     if not user:
         return
 
-    logger.info(f"[DEBUG] WebSocket connection established for user: {user.username}")
     await connection_manager.connect(websocket, user)
 
     try:
@@ -1686,11 +1712,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     content=content,
                     message_type=message_type,
                 )
-                logger.info(
-                    f"[DEBUG] About to save WebSocket message from {user.username}: {content[:50]}..."
-                )
                 storage.add_message(message)
-                logger.info(f"[DEBUG] Message saved successfully! ID: {message.id}")
 
                 logger.info(
                     f"WebSocket message from {user.username} to "
@@ -2098,9 +2120,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
     except WebSocketDisconnect:
         connection_manager.disconnect(user.username)
-        logger.info(f"User {user.username} disconnected from WebSocket")
+        logger.info(f"WebSocket disconnected normally - user: {user.username}")
     except Exception as e:
-        logger.error(f"WebSocket error for user {user.username}: {e}")
+        logger.error(f"WebSocket ERROR - user: {user.username}, error: {e}")
         connection_manager.disconnect(user.username)
 
 

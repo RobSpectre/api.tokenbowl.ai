@@ -26,7 +26,8 @@ class ConnectionManager:
         """
         await websocket.accept()
         self.active_connections[user.username] = websocket
-        logger.info(f"User {user.username} connected via WebSocket")
+        client_host = websocket.client.host if websocket.client else "unknown"
+        logger.info(f"WebSocket CONNECTED - user: {user.username}, client: {client_host}")
 
     def disconnect(self, username: str) -> None:
         """Remove a WebSocket connection.
@@ -36,7 +37,7 @@ class ConnectionManager:
         """
         if username in self.active_connections:
             del self.active_connections[username]
-            logger.info(f"User {username} disconnected from WebSocket")
+            logger.info(f"WebSocket DISCONNECTED - user: {username}")
 
     async def send_message(self, username: str, message: Message) -> bool:
         """Send a message to a specific user via WebSocket.
@@ -159,11 +160,8 @@ async def websocket_auth(websocket: WebSocket) -> User | None:
     Returns:
         Authenticated user or None if authentication fails
     """
-    logger.info(f"[DEBUG] WebSocket auth attempt from {websocket.client}")
-
     # Try API key authentication first (query param or header)
     api_key = websocket.query_params.get("api_key")
-    logger.info(f"[DEBUG] API key from query params: {'present' if api_key else 'missing'}")
 
     if not api_key:
         # Try to get from headers
@@ -190,6 +188,7 @@ async def websocket_auth(websocket: WebSocket) -> User | None:
                 return user
 
     # No valid authentication provided
-    logger.warning("[DEBUG] WebSocket authentication FAILED - closing connection")
+    client_host = websocket.client.host if websocket.client else "unknown"
+    logger.warning(f"WebSocket AUTH FAILED - client: {client_host} - Invalid or missing credentials")
     await websocket.close(code=1008, reason="Invalid or missing authentication credentials")
     return None

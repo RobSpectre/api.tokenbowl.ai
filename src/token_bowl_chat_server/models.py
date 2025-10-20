@@ -424,6 +424,7 @@ class UpdateUsernameRequest(BaseModel):
 class AdminUpdateUserRequest(BaseModel):
     """Admin request model for updating any user's profile."""
 
+    username: str | None = None
     email: str | None = None
     webhook_url: HttpUrl | None = None
     logo: str | None = None
