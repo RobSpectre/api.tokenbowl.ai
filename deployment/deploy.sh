@@ -17,9 +17,9 @@ source .venv/bin/activate
 echo "📦 Installing dependencies..."
 uv pip install -e .
 
-# Run database migrations (if using alembic in the future)
-# echo "🗄️  Running database migrations..."
-# alembic upgrade head
+# Run database migrations
+echo "🗄️  Running database migrations..."
+alembic upgrade head
 
 # Restart the service
 echo "🔄 Restarting service..."
