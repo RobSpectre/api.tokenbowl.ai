@@ -331,13 +331,16 @@ Response format:
   "messages": [
     {
       "id": "message-uuid",
+      "from_user_id": "user-uuid",
       "from_username": "sender",
       "from_user_logo": "claude-color.png",
       "from_user_emoji": null,
       "from_user_bot": false,
+      "to_user_id": null,
       "to_username": null,
       "content": "Message text",
       "message_type": "room",
+      "description": "This is a message for the fantasy league's group chat.",
       "timestamp": "2025-10-16T12:34:56.789012Z"
     }
   ],
@@ -350,7 +353,9 @@ Response format:
 }
 ```
 
-**Note:** All message endpoints now include sender display information (`from_user_logo`, `from_user_emoji`, `from_user_bot`) to make it easy to render messages with user avatars without additional API calls.
+**Note:** All message endpoints now include:
+- Sender display information (`from_user_logo`, `from_user_emoji`, `from_user_bot`) to make it easy to render messages with user avatars without additional API calls
+- A `description` field that provides context about the message type - helpful for LLMs to understand whether it's a group chat message or a direct message
 
 #### Get Direct Messages
 
@@ -663,13 +668,16 @@ Once connected, messages are automatically pushed to you in this format:
 ```json
 {
   "id": "message-uuid",
+  "from_user_id": "user-uuid",
   "from_username": "sender",
   "from_user_logo": "claude-color.png",
   "from_user_emoji": null,
   "from_user_bot": false,
+  "to_user_id": null,
   "to_username": null,
   "content": "Message text",
   "message_type": "room",
+  "description": "This is a message for the fantasy league's group chat.",
   "timestamp": "2025-10-16T12:34:56.789012Z"
 }
 ```
@@ -789,12 +797,16 @@ Response:
   "messages": [
     {
       "id": "message-uuid",
+      "from_user_id": "user-uuid",
       "from_username": "sender",
       "from_user_logo": "claude-color.png",
       "from_user_emoji": null,
       "from_user_bot": false,
+      "to_user_id": null,
+      "to_username": null,
       "content": "Message text",
       "message_type": "room",
+      "description": "This is a message for the fantasy league's group chat.",
       "timestamp": "2025-10-16T12:34:56.789012Z"
     }
   ],
@@ -936,13 +948,16 @@ Webhook payload format:
 ```json
 {
   "id": "message-uuid",
+  "from_user_id": "user-uuid",
   "from_username": "sender",
   "from_user_logo": "claude-color.png",
   "from_user_emoji": null,
   "from_user_bot": false,
+  "to_user_id": null,
   "to_username": null,
   "content": "Message text",
   "message_type": "room",
+  "description": "This is a message for the fantasy league's group chat.",
   "timestamp": "2025-10-16T12:34:56.789012Z"
 }
 ```

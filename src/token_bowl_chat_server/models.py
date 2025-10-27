@@ -294,6 +294,7 @@ class MessageResponse(BaseModel):
     to_username: str | None = None
     content: str
     message_type: MessageType
+    description: str  # Context description for LLMs
     timestamp: str
 
     @classmethod
@@ -309,6 +310,14 @@ class MessageResponse(BaseModel):
             to_user: Optional recipient user object to include their ID
                       If not provided, to_user_id will be None
         """
+        # Generate description based on message type
+        if message.message_type == MessageType.ROOM:
+            description = "This is a message for the fantasy league's group chat."
+        else:  # MessageType.DIRECT
+            description = (
+                f"This is a direct message from {message.from_username} to {message.to_username}."
+            )
+
         return cls(
             id=str(message.id),
             from_user_id=str(from_user.id) if from_user else "",
@@ -320,6 +329,7 @@ class MessageResponse(BaseModel):
             to_username=message.to_username,
             content=message.content,
             message_type=message.message_type,
+            description=description,
             timestamp=message.timestamp.isoformat(),
         )
 

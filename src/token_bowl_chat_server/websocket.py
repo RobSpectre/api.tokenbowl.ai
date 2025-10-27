@@ -54,11 +54,16 @@ class ConnectionManager:
             return False
 
         try:
-            # Fetch sender user info for display
+            # Fetch sender and recipient user info for display
             from .storage import storage
 
             from_user = storage.get_user_by_username(message.from_username)
-            message_data = MessageResponse.from_message(message, from_user=from_user).model_dump()
+            to_user = (
+                storage.get_user_by_username(message.to_username) if message.to_username else None
+            )
+            message_data = MessageResponse.from_message(
+                message, from_user=from_user, to_user=to_user
+            ).model_dump()
             await websocket.send_json(message_data)
             logger.debug(f"Sent message to {username} via WebSocket")
             return True

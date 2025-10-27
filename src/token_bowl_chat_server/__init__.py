@@ -2,6 +2,6 @@
 
 from .server import app, create_app
 
-__version__ = "0.5.3"
+__version__ = "0.5.4"
 
 __all__ = ["__version__", "app", "create_app"]

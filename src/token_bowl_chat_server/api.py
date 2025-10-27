@@ -273,6 +273,7 @@ async def send_message(
             )
 
     # Validate recipient if direct message
+    recipient = None
     if message_request.to_username:
         recipient = storage.get_user_by_username(message_request.to_username)
         if not recipient:
@@ -320,8 +321,7 @@ async def send_message(
         await webhook_delivery.broadcast_to_webhooks(message, webhook_users)
 
     else:
-        # Direct message
-        recipient = storage.get_user_by_username(message_request.to_username)  # type: ignore
+        # Direct message - recipient was already fetched above for validation
         if recipient:
             # Try WebSocket first
             sent_via_ws = await connection_manager.send_message(recipient.username, message)
@@ -330,7 +330,7 @@ async def send_message(
             if not sent_via_ws and recipient.webhook_url:
                 await webhook_delivery.deliver_message(recipient, message)
 
-    return MessageResponse.from_message(message, from_user=current_user)
+    return MessageResponse.from_message(message, from_user=current_user, to_user=recipient)
 
 
 @router.get("/messages", response_model=PaginatedMessagesResponse)
@@ -373,14 +373,24 @@ async def get_messages(
     # Calculate if there are more messages
     has_more = (offset + len(messages)) < total
 
-    # Fetch user info for all message senders
+    # Fetch user info for all message senders and recipients
     user_cache = {}
     message_responses = []
     for msg in messages:
         if msg.from_username not in user_cache:
             user_cache[msg.from_username] = storage.get_user_by_username(msg.from_username)
+
+        # Fetch recipient user for direct messages
+        to_user = None
+        if msg.to_username:
+            if msg.to_username not in user_cache:
+                user_cache[msg.to_username] = storage.get_user_by_username(msg.to_username)
+            to_user = user_cache[msg.to_username]
+
         message_responses.append(
-            MessageResponse.from_message(msg, from_user=user_cache[msg.from_username])
+            MessageResponse.from_message(
+                msg, from_user=user_cache[msg.from_username], to_user=to_user
+            )
         )
 
     return PaginatedMessagesResponse(
@@ -444,14 +454,24 @@ async def get_direct_messages(
     # Calculate if there are more messages
     has_more = (offset + len(messages)) < total
 
-    # Fetch user info for all message senders
+    # Fetch user info for all message senders and recipients
     user_cache = {}
     message_responses = []
     for msg in messages:
         if msg.from_username not in user_cache:
             user_cache[msg.from_username] = storage.get_user_by_username(msg.from_username)
+
+        # Fetch recipient user for direct messages
+        to_user = None
+        if msg.to_username:
+            if msg.to_username not in user_cache:
+                user_cache[msg.to_username] = storage.get_user_by_username(msg.to_username)
+            to_user = user_cache[msg.to_username]
+
         message_responses.append(
-            MessageResponse.from_message(msg, from_user=user_cache[msg.from_username])
+            MessageResponse.from_message(
+                msg, from_user=user_cache[msg.from_username], to_user=to_user
+            )
         )
 
     return PaginatedMessagesResponse(
@@ -483,14 +503,24 @@ async def get_unread_room_messages(
     """
     messages = storage.get_unread_room_messages(current_user.username, limit=limit, offset=offset)
 
-    # Fetch user info for all message senders
+    # Fetch user info for all message senders and recipients
     user_cache = {}
     message_responses = []
     for msg in messages:
         if msg.from_username not in user_cache:
             user_cache[msg.from_username] = storage.get_user_by_username(msg.from_username)
+
+        # Fetch recipient user for direct messages
+        to_user = None
+        if msg.to_username:
+            if msg.to_username not in user_cache:
+                user_cache[msg.to_username] = storage.get_user_by_username(msg.to_username)
+            to_user = user_cache[msg.to_username]
+
         message_responses.append(
-            MessageResponse.from_message(msg, from_user=user_cache[msg.from_username])
+            MessageResponse.from_message(
+                msg, from_user=user_cache[msg.from_username], to_user=to_user
+            )
         )
 
     return message_responses
@@ -514,14 +544,24 @@ async def get_unread_direct_messages(
     """
     messages = storage.get_unread_direct_messages(current_user.username, limit=limit, offset=offset)
 
-    # Fetch user info for all message senders
+    # Fetch user info for all message senders and recipients
     user_cache = {}
     message_responses = []
     for msg in messages:
         if msg.from_username not in user_cache:
             user_cache[msg.from_username] = storage.get_user_by_username(msg.from_username)
+
+        # Fetch recipient user for direct messages
+        to_user = None
+        if msg.to_username:
+            if msg.to_username not in user_cache:
+                user_cache[msg.to_username] = storage.get_user_by_username(msg.to_username)
+            to_user = user_cache[msg.to_username]
+
         message_responses.append(
-            MessageResponse.from_message(msg, from_user=user_cache[msg.from_username])
+            MessageResponse.from_message(
+                msg, from_user=user_cache[msg.from_username], to_user=to_user
+            )
         )
 
     return message_responses
@@ -1143,9 +1183,10 @@ async def admin_get_message(
             detail=f"Message {message_id} not found",
         )
 
-    # Fetch sender user info
+    # Fetch sender and recipient user info
     from_user = storage.get_user_by_username(message.from_username)
-    return MessageResponse.from_message(message, from_user=from_user)
+    to_user = storage.get_user_by_username(message.to_username) if message.to_username else None
+    return MessageResponse.from_message(message, from_user=from_user, to_user=to_user)
 
 
 @router.patch("/admin/messages/{message_id}", response_model=MessageResponse)
@@ -1184,9 +1225,10 @@ async def admin_update_message(
 
     logger.info(f"Admin {admin_user.username} updated message {message_id}")
 
-    # Fetch sender user info
+    # Fetch sender and recipient user info
     from_user = storage.get_user_by_username(message.from_username)
-    return MessageResponse.from_message(message, from_user=from_user)
+    to_user = storage.get_user_by_username(message.to_username) if message.to_username else None
+    return MessageResponse.from_message(message, from_user=from_user, to_user=to_user)
 
 
 @router.delete("/admin/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1758,12 +1800,14 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                             await webhook_delivery.deliver_message(recipient, message)
 
                 # Send confirmation back to sender
+                # Fetch recipient user for direct messages
+                recipient_user = storage.get_user_by_username(to_username) if to_username else None
                 await websocket.send_json(
                     {
                         "type": "message_sent",
                         "status": "sent",
                         "message": MessageResponse.from_message(
-                            message, from_user=user
+                            message, from_user=user, to_user=recipient_user
                         ).model_dump(),
                     }
                 )
@@ -1903,7 +1947,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 # Calculate if there are more messages
                 has_more = (offset + len(messages)) < total
 
-                # Fetch user info for all message senders
+                # Fetch user info for all message senders and recipients
                 user_cache = {}
                 message_responses = []
                 for msg in messages:
@@ -1911,9 +1955,19 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         user_cache[msg.from_username] = storage.get_user_by_username(
                             msg.from_username
                         )
+
+                    # Fetch recipient user for direct messages
+                    to_user = None
+                    if msg.to_username:
+                        if msg.to_username not in user_cache:
+                            user_cache[msg.to_username] = storage.get_user_by_username(
+                                msg.to_username
+                            )
+                        to_user = user_cache[msg.to_username]
+
                     message_responses.append(
                         MessageResponse.from_message(
-                            msg, from_user=user_cache[msg.from_username]
+                            msg, from_user=user_cache[msg.from_username], to_user=to_user
                         ).model_dump()
                     )
 
@@ -1961,7 +2015,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 # Calculate if there are more messages
                 has_more = (offset + len(messages)) < total
 
-                # Fetch user info for all message senders
+                # Fetch user info for all message senders and recipients
                 user_cache = {}
                 message_responses = []
                 for msg in messages:
@@ -1969,9 +2023,19 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         user_cache[msg.from_username] = storage.get_user_by_username(
                             msg.from_username
                         )
+
+                    # Fetch recipient user for direct messages
+                    to_user = None
+                    if msg.to_username:
+                        if msg.to_username not in user_cache:
+                            user_cache[msg.to_username] = storage.get_user_by_username(
+                                msg.to_username
+                            )
+                        to_user = user_cache[msg.to_username]
+
                     message_responses.append(
                         MessageResponse.from_message(
-                            msg, from_user=user_cache[msg.from_username]
+                            msg, from_user=user_cache[msg.from_username], to_user=to_user
                         ).model_dump()
                     )
 
@@ -1997,7 +2061,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     user.username, limit=limit, offset=offset
                 )
 
-                # Fetch user info for all message senders
+                # Fetch user info for all message senders and recipients
                 user_cache = {}
                 message_responses = []
                 for msg in messages:
@@ -2005,9 +2069,19 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         user_cache[msg.from_username] = storage.get_user_by_username(
                             msg.from_username
                         )
+
+                    # Fetch recipient user for direct messages
+                    to_user = None
+                    if msg.to_username:
+                        if msg.to_username not in user_cache:
+                            user_cache[msg.to_username] = storage.get_user_by_username(
+                                msg.to_username
+                            )
+                        to_user = user_cache[msg.to_username]
+
                     message_responses.append(
                         MessageResponse.from_message(
-                            msg, from_user=user_cache[msg.from_username]
+                            msg, from_user=user_cache[msg.from_username], to_user=to_user
                         ).model_dump()
                     )
 
@@ -2027,7 +2101,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     user.username, limit=limit, offset=offset
                 )
 
-                # Fetch user info for all message senders
+                # Fetch user info for all message senders and recipients
                 user_cache = {}
                 message_responses = []
                 for msg in messages:
@@ -2035,9 +2109,19 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         user_cache[msg.from_username] = storage.get_user_by_username(
                             msg.from_username
                         )
+
+                    # Fetch recipient user for direct messages
+                    to_user = None
+                    if msg.to_username:
+                        if msg.to_username not in user_cache:
+                            user_cache[msg.to_username] = storage.get_user_by_username(
+                                msg.to_username
+                            )
+                        to_user = user_cache[msg.to_username]
+
                     message_responses.append(
                         MessageResponse.from_message(
-                            msg, from_user=user_cache[msg.from_username]
+                            msg, from_user=user_cache[msg.from_username], to_user=to_user
                         ).model_dump()
                     )
 

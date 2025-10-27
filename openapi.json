@@ -274,7 +274,7 @@
     "/messages/direct": {
       "get": {
         "summary": "Get Direct Messages",
-        "description": "Get direct messages for the current user with pagination.\n\nArgs:\n    limit: Maximum number of messages to return (default: 50)\n    offset: Number of messages to skip (default: 0)\n    since: ISO timestamp to get messages after\n    current_user: Authenticated user\n\nReturns:\n    Paginated list of direct messages with metadata\n\nRaises:\n    HTTPException: If since timestamp is invalid",
+        "description": "Get direct messages for the current user with pagination.\n\nFor viewer users, this returns ALL direct messages in the system.\nFor regular users, this returns only their own direct messages.\n\nArgs:\n    limit: Maximum number of messages to return (default: 50)\n    offset: Number of messages to skip (default: 0)\n    since: ISO timestamp to get messages after\n    current_user: Authenticated user\n\nReturns:\n    Paginated list of direct messages with metadata\n\nRaises:\n    HTTPException: If since timestamp is invalid",
         "operationId": "get_direct_messages_messages_direct_get",
         "security": [
           {
@@ -2502,6 +2502,10 @@
           "message_type": {
             "$ref": "#/components/schemas/MessageType"
           },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
           "timestamp": {
             "type": "string",
             "title": "Timestamp"
@@ -2514,6 +2518,7 @@
           "from_username",
           "content",
           "message_type",
+          "description",
           "timestamp"
         ],
         "title": "MessageResponse",
