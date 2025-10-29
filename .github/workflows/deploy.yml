@@ -35,7 +35,7 @@ jobs:
           sleep 5
 
           # Check if service is running
-          sudo supervisorctl status api.tokenbowl.ai | grep -q "RUNNING" && echo "✅ Service is running" || exit 1
+          sudo supervisorctl status infra:api.tokenbowl.ai | grep -q "RUNNING" && echo "✅ Service is running" || exit 1
 
           # Check health endpoint
           curl -f http://localhost:8000/health || exit 1

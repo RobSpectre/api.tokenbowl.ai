@@ -23,17 +23,17 @@ alembic upgrade head
 
 # Restart the service
 echo "🔄 Restarting service..."
-sudo supervisorctl restart "$SERVICE_NAME"
+sudo supervisorctl restart infra:"$SERVICE_NAME"
 
 # Wait a moment for service to start
 sleep 2
 
 # Check service status
-if sudo supervisorctl status "$SERVICE_NAME" | grep -q "RUNNING"; then
+if sudo supervisorctl status infra:"$SERVICE_NAME" | grep -q "RUNNING"; then
     echo "✅ Service restarted successfully"
 else
     echo "❌ Service failed to start"
-    sudo supervisorctl status "$SERVICE_NAME"
+    sudo supervisorctl status infra:"$SERVICE_NAME"
     exit 1
 fi
 
