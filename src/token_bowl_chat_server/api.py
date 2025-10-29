@@ -2737,10 +2737,10 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     )
                     continue
 
-                if user.admin and conversation.created_by_username != user.username:
+                if user.admin and conv_to_delete.created_by_username != user.username:
                     logger.info(
                         f"Admin {user.username} deleted conversation {conversation_id} "
-                        f"(created by {conversation.created_by_username}) via WebSocket"
+                        f"(created by {conv_to_delete.created_by_username}) via WebSocket"
                     )
                 else:
                     logger.info(
@@ -2795,7 +2795,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
                 logger.info(
                     f"Admin {user.username} deleted message {message_id} "
-                    f"(from {message.from_username}) via WebSocket"
+                    f"(from {msg_to_delete.from_username}) via WebSocket"
                 )
 
                 await websocket.send_json(
