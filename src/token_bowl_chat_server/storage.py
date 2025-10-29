@@ -11,7 +11,7 @@ from alembic import command
 from alembic.config import Config
 from pydantic import HttpUrl
 
-from .models import Message, MessageType, Role, User
+from .models import Conversation, Message, MessageType, Role, User
 
 
 class ChatStorage:
@@ -112,6 +112,25 @@ class ChatStorage:
                 cursor.execute("""
                     CREATE INDEX IF NOT EXISTS idx_read_receipts_message_id
                     ON read_receipts(message_id)
+                """)
+
+                # Create conversations table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS conversations (
+                        id TEXT PRIMARY KEY,
+                        title TEXT,
+                        description TEXT,
+                        message_ids TEXT NOT NULL,
+                        created_by_username TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        FOREIGN KEY (created_by_username) REFERENCES users(username) ON DELETE CASCADE
+                    )
+                """)
+
+                # Create index for conversations by creator
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_conversations_created_by
+                    ON conversations(created_by_username)
                 """)
 
                 conn.commit()
@@ -1136,6 +1155,240 @@ class ChatStorage:
             unread_direct = cursor.fetchone()["count"]
 
             return unread_room, unread_direct, unread_room + unread_direct
+
+    def add_conversation(self, conversation: Conversation) -> None:
+        """Add a conversation to storage.
+
+        Args:
+            conversation: Conversation to add
+        """
+        import json
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Serialize message_ids to JSON for storage
+            message_ids_json = json.dumps([str(msg_id) for msg_id in conversation.message_ids])
+
+            cursor.execute(
+                """
+                INSERT INTO conversations (id, title, description, message_ids, created_by_username, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(conversation.id),
+                    conversation.title,
+                    conversation.description,
+                    message_ids_json,
+                    conversation.created_by_username,
+                    conversation.created_at.isoformat(),
+                ),
+            )
+            conn.commit()
+
+    def get_conversation_by_id(self, conversation_id: str) -> Conversation | None:
+        """Get a conversation by its ID.
+
+        Args:
+            conversation_id: Conversation ID to look up
+
+        Returns:
+            Conversation if found, None otherwise
+        """
+        import json
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,))
+            row = cursor.fetchone()
+
+            if not row:
+                return None
+
+            # Deserialize message_ids from JSON
+            message_ids = [UUID(msg_id) for msg_id in json.loads(row["message_ids"])]
+
+            return Conversation(
+                id=UUID(row["id"]),
+                title=row["title"],
+                description=row["description"],
+                message_ids=message_ids,
+                created_by_username=row["created_by_username"],
+                created_at=datetime.fromisoformat(row["created_at"]),
+            )
+
+    def get_conversations_by_user(
+        self, username: str, limit: int = 50, offset: int = 0
+    ) -> list[Conversation]:
+        """Get all conversations created by a user.
+
+        Args:
+            username: Username to get conversations for
+            limit: Maximum number of conversations to return
+            offset: Number of conversations to skip from the start
+
+        Returns:
+            List of conversations created by this user
+        """
+        import json
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT * FROM conversations
+                WHERE created_by_username = ?
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                (username, limit, offset),
+            )
+            rows = cursor.fetchall()
+
+            conversations = []
+            for row in rows:
+                # Deserialize message_ids from JSON
+                message_ids = [UUID(msg_id) for msg_id in json.loads(row["message_ids"])]
+                conversations.append(
+                    Conversation(
+                        id=UUID(row["id"]),
+                        title=row["title"],
+                        description=row["description"],
+                        message_ids=message_ids,
+                        created_by_username=row["created_by_username"],
+                        created_at=datetime.fromisoformat(row["created_at"]),
+                    )
+                )
+
+            return conversations
+
+    def get_all_conversations(self, limit: int = 50, offset: int = 0) -> list[Conversation]:
+        """Get all conversations with pagination.
+
+        Args:
+            limit: Maximum number of conversations to return
+            offset: Number of conversations to skip from the start
+
+        Returns:
+            List of all conversations
+        """
+        import json
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT * FROM conversations
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            )
+            rows = cursor.fetchall()
+
+            conversations = []
+            for row in rows:
+                # Deserialize message_ids from JSON
+                message_ids = [UUID(msg_id) for msg_id in json.loads(row["message_ids"])]
+                conversations.append(
+                    Conversation(
+                        id=UUID(row["id"]),
+                        title=row["title"],
+                        description=row["description"],
+                        message_ids=message_ids,
+                        created_by_username=row["created_by_username"],
+                        created_at=datetime.fromisoformat(row["created_at"]),
+                    )
+                )
+
+            return conversations
+
+    def get_conversations_count(self, username: str | None = None) -> int:
+        """Get total count of conversations.
+
+        Args:
+            username: If provided, count only conversations by this user
+
+        Returns:
+            Total count of conversations
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            if username:
+                cursor.execute(
+                    "SELECT COUNT(*) as count FROM conversations WHERE created_by_username = ?",
+                    (username,),
+                )
+            else:
+                cursor.execute("SELECT COUNT(*) as count FROM conversations")
+
+            result = cursor.fetchone()
+            return int(result["count"]) if result else 0
+
+    def update_conversation(
+        self,
+        conversation_id: str,
+        title: str | None = None,
+        description: str | None = None,
+        message_ids: list[UUID] | None = None,
+    ) -> bool:
+        """Update a conversation.
+
+        Args:
+            conversation_id: Conversation ID to update
+            title: New title (or None to skip)
+            description: New description (or None to skip)
+            message_ids: New message IDs list (or None to skip)
+
+        Returns:
+            True if conversation was updated, False if not found
+        """
+        import json
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Build update query dynamically
+            updates = []
+            params: list = []
+
+            if title is not None:
+                updates.append("title = ?")
+                params.append(title)
+
+            if description is not None:
+                updates.append("description = ?")
+                params.append(description)
+
+            if message_ids is not None:
+                updates.append("message_ids = ?")
+                params.append(json.dumps([str(msg_id) for msg_id in message_ids]))
+
+            if not updates:
+                return False
+
+            params.append(conversation_id)
+            query = f"UPDATE conversations SET {', '.join(updates)} WHERE id = ?"
+
+            cursor.execute(query, params)
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_conversation(self, conversation_id: str) -> bool:
+        """Delete a conversation.
+
+        Args:
+            conversation_id: Conversation ID to delete
+
+        Returns:
+            True if conversation was deleted, False if not found
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+            conn.commit()
+            return cursor.rowcount > 0
 
 
 # Global storage instance

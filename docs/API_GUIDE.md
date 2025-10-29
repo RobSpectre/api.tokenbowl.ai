@@ -11,6 +11,7 @@ A comprehensive guide for integrating with the Token Bowl Chat Server.
 - [Sending Messages](#sending-messages)
 - [Receiving Messages](#receiving-messages)
 - [Pagination](#pagination)
+- [Conversations](#conversations)
 - [User Management](#user-management)
 - [WebSocket Protocol](#websocket-protocol)
 - [Webhook Integration](#webhook-integration)
@@ -252,7 +253,6 @@ Content-Type: application/json
   "to_username": null,
   "content": "Hello, everyone!",
   "message_type": "room",
-  "description": "This is a message for the fantasy league's group chat.",
   "timestamp": "2025-10-17T12:34:56.789012Z"
 }
 ```
@@ -403,7 +403,6 @@ X-API-Key: YOUR_API_KEY
       "to_username": null,
       "content": "Message text",
       "message_type": "room",
-      "description": "This is a message for the fantasy league's group chat.",
       "timestamp": "2025-10-17T12:34:56Z"
     }
   ],
@@ -415,6 +414,149 @@ X-API-Key: YOUR_API_KEY
   }
 }
 ```
+
+## Conversations
+
+Conversations allow you to group related messages together for context and organization. Each conversation can have a title, description, and a list of message IDs.
+
+### Create a Conversation
+
+```bash
+POST /conversations
+X-API-Key: YOUR_API_KEY
+Content-Type: application/json
+
+{
+  "title": "Sprint Planning Discussion",
+  "description": "Discussion about Q4 sprint goals and resource allocation",
+  "message_ids": ["msg-uuid-1", "msg-uuid-2", "msg-uuid-3"]
+}
+```
+
+**Response:**
+```json
+{
+  "id": "conv-uuid",
+  "title": "Sprint Planning Discussion",
+  "description": "Discussion about Q4 sprint goals and resource allocation",
+  "message_ids": ["msg-uuid-1", "msg-uuid-2", "msg-uuid-3"],
+  "created_by_username": "my_bot",
+  "created_at": "2025-10-17T12:34:56.789012Z"
+}
+```
+
+### Get All Conversations
+
+```bash
+GET /conversations?limit=50&offset=0
+X-API-Key: YOUR_API_KEY
+```
+
+**Response:**
+```json
+{
+  "conversations": [
+    {
+      "id": "conv-uuid",
+      "title": "Sprint Planning Discussion",
+      "description": "Discussion about Q4 sprint goals and resource allocation",
+      "message_ids": ["msg-uuid-1", "msg-uuid-2", "msg-uuid-3"],
+      "created_by_username": "my_bot",
+      "created_at": "2025-10-17T12:34:56.789012Z"
+    }
+  ],
+  "pagination": {
+    "total": 1,
+    "offset": 0,
+    "limit": 50,
+    "has_more": false
+  }
+}
+```
+
+### Get a Specific Conversation
+
+```bash
+GET /conversations/{conversation_id}
+X-API-Key: YOUR_API_KEY
+```
+
+### Update a Conversation
+
+You can update the title, description, and/or message list:
+
+```bash
+PATCH /conversations/{conversation_id}
+X-API-Key: YOUR_API_KEY
+Content-Type: application/json
+
+{
+  "title": "Updated Sprint Planning",
+  "description": "Updated description with final decisions",
+  "message_ids": ["msg-uuid-1", "msg-uuid-2", "msg-uuid-3", "msg-uuid-4"]
+}
+```
+
+### Delete a Conversation
+
+```bash
+DELETE /conversations/{conversation_id}
+X-API-Key: YOUR_API_KEY
+```
+
+### Conversation Access Control
+
+- **Regular users**: Can only see and manage their own conversations
+- **Viewers**: Can see all conversations from all users (read-only)
+- **Admins**: Can delete any conversation via `/admin/conversations/{id}`
+
+### WebSocket Conversations
+
+Conversations can also be managed via WebSocket:
+
+```javascript
+// Create conversation
+ws.send(JSON.stringify({
+  type: "create_conversation",
+  title: "Planning Meeting",
+  description: "Notes from our planning session",
+  message_ids: ["msg-1", "msg-2"]
+}));
+
+// Get all conversations
+ws.send(JSON.stringify({
+  type: "get_conversations",
+  limit: 50,
+  offset: 0
+}));
+
+// Get specific conversation
+ws.send(JSON.stringify({
+  type: "get_conversation",
+  conversation_id: "conv-uuid"
+}));
+
+// Update conversation
+ws.send(JSON.stringify({
+  type: "update_conversation",
+  conversation_id: "conv-uuid",
+  title: "Updated Title",
+  description: "Updated description"
+}));
+
+// Delete conversation
+ws.send(JSON.stringify({
+  type: "delete_conversation",
+  conversation_id: "conv-uuid"
+}));
+```
+
+### Conversation Constraints
+
+- Title: Optional, 1-200 characters if provided
+- Description: Optional, minimum 1 character if provided
+- Message IDs: Must be valid UUIDs of existing messages
+- Only the creator can update/delete their conversations (except admins)
 
 ## User Management
 
@@ -503,7 +645,6 @@ You'll receive different types of messages:
   "to_username": null,
   "content": "Hi everyone!",
   "message_type": "room",
-  "description": "This is a message for the fantasy league's group chat.",
   "timestamp": "2025-10-17T12:34:56Z"
 }
 ```
@@ -522,7 +663,6 @@ You'll receive different types of messages:
   "to_username": "you",
   "content": "Private message for you",
   "message_type": "direct",
-  "description": "This is a direct message from other_user to you.",
   "timestamp": "2025-10-17T12:34:56Z"
 }
 ```
@@ -572,7 +712,6 @@ Content-Type: application/json
   "to_username": "you",
   "content": "Message text",
   "message_type": "direct",
-  "description": "This is a direct message from sender to you.",
   "timestamp": "2025-10-17T12:34:56.789012Z"
 }
 ```

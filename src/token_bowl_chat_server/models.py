@@ -570,3 +570,89 @@ class InviteUserResponse(BaseModel):
     email: str
     role: Role
     message: str
+
+
+class Conversation(BaseModel):
+    """Conversation model for grouping messages."""
+
+    model_config = ConfigDict(ser_json_timedelta="iso8601")
+
+    id: UUID = Field(default_factory=uuid4)
+    title: str | None = Field(None, min_length=1, max_length=200)
+    description: str | None = Field(None, min_length=1)
+    message_ids: list[UUID] = Field(default_factory=list)
+    created_by_username: str = Field(..., min_length=1, max_length=50)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class CreateConversationRequest(BaseModel):
+    """Request model for creating a conversation."""
+
+    title: str | None = Field(None, min_length=1, max_length=200)
+    description: str | None = Field(None, min_length=1)
+    message_ids: list[str] = Field(default_factory=list)  # UUIDs as strings
+
+    @field_validator("message_ids")
+    @classmethod
+    def validate_message_ids(cls, v: list[str]) -> list[str]:
+        """Validate that all message_ids are valid UUIDs."""
+        for msg_id in v:
+            try:
+                UUID(msg_id)
+            except ValueError as e:
+                raise ValueError(f"Invalid UUID format for message_id: {msg_id}") from e
+        return v
+
+
+class UpdateConversationRequest(BaseModel):
+    """Request model for updating a conversation."""
+
+    title: str | None = Field(None, min_length=1, max_length=200)
+    description: str | None = Field(None, min_length=1)
+    message_ids: list[str] | None = None  # UUIDs as strings
+
+    @field_validator("message_ids")
+    @classmethod
+    def validate_message_ids(cls, v: list[str] | None) -> list[str] | None:
+        """Validate that all message_ids are valid UUIDs."""
+        if v is not None:
+            for msg_id in v:
+                try:
+                    UUID(msg_id)
+                except ValueError as e:
+                    raise ValueError(f"Invalid UUID format for message_id: {msg_id}") from e
+        return v
+
+
+class ConversationResponse(BaseModel):
+    """Response model for conversations."""
+
+    id: str  # UUID as string
+    title: str | None = None
+    description: str | None = None
+    message_ids: list[str] = Field(default_factory=list)  # UUIDs as strings
+    created_by_username: str
+    created_at: str
+
+    @classmethod
+    def from_conversation(cls, conversation: Conversation) -> ConversationResponse:
+        """Create ConversationResponse from Conversation.
+
+        Args:
+            conversation: The conversation to convert
+        """
+        return cls(
+            id=str(conversation.id),
+            title=conversation.title,
+            description=conversation.description,
+            message_ids=[str(msg_id) for msg_id in conversation.message_ids],
+            created_by_username=conversation.created_by_username,
+            created_at=conversation.created_at.isoformat(),
+        )
+
+
+class PaginatedConversationsResponse(BaseModel):
+    """Paginated response for conversations."""
+
+    conversations: list[ConversationResponse]
+    pagination: PaginationMetadata

@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 
 from .auth import generate_api_key, get_current_admin, get_current_user, require_permission
 from .config import settings
@@ -15,13 +15,17 @@ from .models import (
     AssignRoleRequest,
     AssignRoleResponse,
     BotProfileResponse,
+    Conversation,
+    ConversationResponse,
     CreateBotRequest,
     CreateBotResponse,
+    CreateConversationRequest,
     InviteUserRequest,
     InviteUserResponse,
     Message,
     MessageResponse,
     MessageType,
+    PaginatedConversationsResponse,
     PaginatedMessagesResponse,
     PaginationMetadata,
     Permission,
@@ -34,6 +38,7 @@ from .models import (
     StytchLoginResponse,
     UnreadCountResponse,
     UpdateBotRequest,
+    UpdateConversationRequest,
     UpdateLogoRequest,
     UpdateUsernameRequest,
     UpdateWebhookRequest,
@@ -1255,6 +1260,42 @@ async def admin_delete_message(
     logger.info(f"Admin {admin_user.username} deleted message {message_id}")
 
 
+@router.delete("/admin/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def admin_delete_conversation(
+    conversation_id: str,
+    admin_user: User = Depends(get_current_admin),
+) -> None:
+    """Admin: Delete any conversation.
+
+    Args:
+        conversation_id: Conversation UUID to delete
+        admin_user: Authenticated admin user
+
+    Raises:
+        HTTPException: If conversation not found
+    """
+    conversation = storage.get_conversation_by_id(conversation_id)
+
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {conversation_id} not found",
+        )
+
+    success = storage.delete_conversation(conversation_id)
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete conversation",
+        )
+
+    logger.info(
+        f"Admin {admin_user.username} deleted conversation {conversation_id} "
+        f"(created by {conversation.created_by_username})"
+    )
+
+
 @router.post("/bots", response_model=CreateBotResponse, status_code=status.HTTP_201_CREATED)
 async def create_bot(
     request: CreateBotRequest,
@@ -1659,6 +1700,245 @@ async def invite_user_by_email(
         ) from e
 
 
+# Conversation endpoints
+
+
+@router.post(
+    "/conversations", response_model=ConversationResponse, status_code=status.HTTP_201_CREATED
+)
+async def create_conversation(
+    request: CreateConversationRequest,
+    current_user: User = Depends(get_current_user),
+) -> ConversationResponse:
+    """Create a new conversation.
+
+    Args:
+        request: Conversation creation request
+        current_user: Authenticated user
+
+    Returns:
+        Created conversation
+
+    Raises:
+        HTTPException: If message IDs are invalid
+    """
+    # Convert string UUIDs to UUID objects
+    message_ids = [UUID(msg_id) for msg_id in request.message_ids]
+
+    # Verify all message IDs exist
+    for msg_id in message_ids:
+        message = storage.get_message_by_id(str(msg_id))
+        if not message:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Message {msg_id} not found",
+            )
+
+    # Create conversation
+    conversation = Conversation(
+        title=request.title,
+        description=request.description,
+        message_ids=message_ids,
+        created_by_username=current_user.username,
+    )
+
+    storage.add_conversation(conversation)
+
+    logger.info(
+        f"User {current_user.username} created conversation {conversation.id} with {len(message_ids)} messages"
+    )
+
+    return ConversationResponse.from_conversation(conversation)
+
+
+@router.get("/conversations", response_model=PaginatedConversationsResponse)
+async def get_conversations(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    current_user: User = Depends(get_current_user),
+) -> PaginatedConversationsResponse:
+    """Get conversations created by the current user (or all conversations if viewer).
+
+    Viewers can see all conversations from all users.
+    Regular users can only see their own conversations.
+
+    Args:
+        limit: Maximum number of conversations to return
+        offset: Number of conversations to skip
+        current_user: Authenticated user
+
+    Returns:
+        Paginated list of conversations
+    """
+    # Viewers can see all conversations
+    if current_user.viewer:
+        conversations = storage.get_all_conversations(limit, offset)
+        total = storage.get_conversations_count()
+    else:
+        conversations = storage.get_conversations_by_user(current_user.username, limit, offset)
+        total = storage.get_conversations_count(current_user.username)
+
+    return PaginatedConversationsResponse(
+        conversations=[ConversationResponse.from_conversation(c) for c in conversations],
+        pagination=PaginationMetadata(
+            total=total,
+            offset=offset,
+            limit=limit,
+            has_more=offset + len(conversations) < total,
+        ),
+    )
+
+
+@router.get("/conversations/{conversation_id}", response_model=ConversationResponse)
+async def get_conversation(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+) -> ConversationResponse:
+    """Get a specific conversation.
+
+    Viewers can view any conversation.
+    Regular users can only view their own conversations.
+
+    Args:
+        conversation_id: Conversation UUID
+        current_user: Authenticated user
+
+    Returns:
+        Conversation details
+
+    Raises:
+        HTTPException: If conversation not found or user doesn't own it
+    """
+    conversation = storage.get_conversation_by_id(conversation_id)
+
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {conversation_id} not found",
+        )
+
+    # Only the creator or viewers can view the conversation
+    if not current_user.viewer and conversation.created_by_username != current_user.username:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only view your own conversations",
+        )
+
+    return ConversationResponse.from_conversation(conversation)
+
+
+@router.patch("/conversations/{conversation_id}", response_model=ConversationResponse)
+async def update_conversation(
+    conversation_id: str,
+    request: UpdateConversationRequest,
+    current_user: User = Depends(get_current_user),
+) -> ConversationResponse:
+    """Update a conversation.
+
+    Args:
+        conversation_id: Conversation UUID
+        request: Update request
+        current_user: Authenticated user
+
+    Returns:
+        Updated conversation
+
+    Raises:
+        HTTPException: If conversation not found, user doesn't own it, or message IDs are invalid
+    """
+    conversation = storage.get_conversation_by_id(conversation_id)
+
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {conversation_id} not found",
+        )
+
+    # Only the creator can update their conversation
+    if conversation.created_by_username != current_user.username:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only update your own conversations",
+        )
+
+    # Convert string UUIDs to UUID objects if provided
+    message_ids = None
+    if request.message_ids is not None:
+        message_ids = [UUID(msg_id) for msg_id in request.message_ids]
+
+        # Verify all message IDs exist
+        for msg_id in message_ids:
+            message = storage.get_message_by_id(str(msg_id))
+            if not message:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Message {msg_id} not found",
+                )
+
+    # Update conversation
+    success = storage.update_conversation(
+        conversation_id, request.title, request.description, message_ids
+    )
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update conversation",
+        )
+
+    # Fetch updated conversation
+    updated_conversation = storage.get_conversation_by_id(conversation_id)
+    if not updated_conversation:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve updated conversation",
+        )
+
+    logger.info(f"User {current_user.username} updated conversation {conversation_id}")
+
+    return ConversationResponse.from_conversation(updated_conversation)
+
+
+@router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_conversation(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+) -> None:
+    """Delete a conversation.
+
+    Args:
+        conversation_id: Conversation UUID
+        current_user: Authenticated user
+
+    Raises:
+        HTTPException: If conversation not found or user doesn't own it
+    """
+    conversation = storage.get_conversation_by_id(conversation_id)
+
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {conversation_id} not found",
+        )
+
+    # Only the creator can delete their conversation
+    if conversation.created_by_username != current_user.username:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only delete your own conversations",
+        )
+
+    success = storage.delete_conversation(conversation_id)
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete conversation",
+        )
+
+    logger.info(f"User {current_user.username} deleted conversation {conversation_id}")
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
     """WebSocket endpoint for real-time messaging, read receipts, and data queries.
@@ -1689,6 +1969,16 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     - Get all users: {"type": "get_users"}
     - Get online users: {"type": "get_online_users"}
     - Get user profile: {"type": "get_user_profile", "username": "..."}
+
+    Conversations:
+    - Create conversation: {"type": "create_conversation", "title": "...", "message_ids": ["uuid1", "uuid2"]}
+    - Get conversations: {"type": "get_conversations", "limit": 50, "offset": 0}
+    - Get conversation: {"type": "get_conversation", "conversation_id": "..."}
+    - Update conversation: {"type": "update_conversation", "conversation_id": "...", "title": "...", "message_ids": ["uuid1", "uuid2"]}
+    - Delete conversation: {"type": "delete_conversation", "conversation_id": "..."}
+
+    Administration (admins only):
+    - Delete message: {"type": "delete_message", "message_id": "..."}
 
     Args:
         websocket: WebSocket connection
@@ -2205,6 +2495,313 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                             "bot": u.bot,
                             "viewer": u.viewer,
                         },
+                    }
+                )
+
+            elif msg_type == "create_conversation":
+                # Create a new conversation
+                title = data.get("title")
+                description = data.get("description")
+                message_ids_str = data.get("message_ids", [])
+
+                # Validate message_ids format
+                try:
+                    message_ids = [UUID(msg_id) for msg_id in message_ids_str]
+                except ValueError:
+                    await websocket.send_json(
+                        {"type": "error", "error": "Invalid message ID format"}
+                    )
+                    continue
+
+                # Verify all message IDs exist
+                for msg_id in message_ids:
+                    msg_check = storage.get_message_by_id(str(msg_id))
+                    if not msg_check:
+                        await websocket.send_json(
+                            {"type": "error", "error": f"Message {msg_id} not found"}
+                        )
+                        continue
+
+                # Create conversation
+                conversation = Conversation(
+                    title=title,
+                    description=description,
+                    message_ids=message_ids,
+                    created_by_username=user.username,
+                )
+
+                storage.add_conversation(conversation)
+
+                logger.info(
+                    f"User {user.username} created conversation {conversation.id} with {len(message_ids)} messages via WebSocket"
+                )
+
+                await websocket.send_json(
+                    {
+                        "type": "conversation_created",
+                        "conversation": ConversationResponse.from_conversation(
+                            conversation
+                        ).model_dump(),
+                    }
+                )
+
+            elif msg_type == "get_conversations":
+                # Get all conversations for current user (or all if viewer)
+                limit = data.get("limit", 50)
+                offset = data.get("offset", 0)
+
+                # Viewers can see all conversations
+                if user.viewer:
+                    conversations = storage.get_all_conversations(limit, offset)
+                    total = storage.get_conversations_count()
+                else:
+                    conversations = storage.get_conversations_by_user(user.username, limit, offset)
+                    total = storage.get_conversations_count(user.username)
+
+                conversation_responses = [
+                    ConversationResponse.from_conversation(c).model_dump() for c in conversations
+                ]
+
+                await websocket.send_json(
+                    {
+                        "type": "conversations",
+                        "conversations": conversation_responses,
+                        "pagination": {
+                            "total": total,
+                            "offset": offset,
+                            "limit": limit,
+                            "has_more": offset + len(conversations) < total,
+                        },
+                    }
+                )
+
+            elif msg_type == "get_conversation":
+                # Get a specific conversation
+                conversation_id = data.get("conversation_id")
+
+                if not conversation_id:
+                    await websocket.send_json(
+                        {"type": "error", "error": "Missing conversation_id field"}
+                    )
+                    continue
+
+                conv_result = storage.get_conversation_by_id(conversation_id)
+
+                if not conv_result:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "error": f"Conversation {conversation_id} not found",
+                        }
+                    )
+                    continue
+
+                # Only the creator or viewers can view the conversation
+                if not user.viewer and conv_result.created_by_username != user.username:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "error": "You can only view your own conversations",
+                        }
+                    )
+                    continue
+
+                await websocket.send_json(
+                    {
+                        "type": "conversation",
+                        "conversation": ConversationResponse.from_conversation(
+                            conv_result
+                        ).model_dump(),
+                    }
+                )
+
+            elif msg_type == "update_conversation":
+                # Update a conversation
+                conversation_id = data.get("conversation_id")
+                title = data.get("title")
+                description = data.get("description")
+                message_ids_str = data.get("message_ids")
+
+                if not conversation_id:
+                    await websocket.send_json(
+                        {"type": "error", "error": "Missing conversation_id field"}
+                    )
+                    continue
+
+                conv_to_update = storage.get_conversation_by_id(conversation_id)
+
+                if not conv_to_update:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "error": f"Conversation {conversation_id} not found",
+                        }
+                    )
+                    continue
+
+                # Only the creator can update their conversation
+                if conv_to_update.created_by_username != user.username:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "error": "You can only update your own conversations",
+                        }
+                    )
+                    continue
+
+                # Convert string UUIDs to UUID objects if provided
+                message_ids = None
+                if message_ids_str is not None:
+                    try:
+                        message_ids = [UUID(msg_id) for msg_id in message_ids_str]
+                    except ValueError:
+                        await websocket.send_json(
+                            {"type": "error", "error": "Invalid message ID format"}
+                        )
+                        continue
+
+                    # Verify all message IDs exist
+                    for msg_id in message_ids:
+                        msg_check = storage.get_message_by_id(str(msg_id))
+                        if not msg_check:
+                            await websocket.send_json(
+                                {"type": "error", "error": f"Message {msg_id} not found"}
+                            )
+                            continue
+
+                # Update conversation
+                success = storage.update_conversation(
+                    conversation_id, title, description, message_ids
+                )
+
+                if not success:
+                    await websocket.send_json(
+                        {"type": "error", "error": "Failed to update conversation"}
+                    )
+                    continue
+
+                # Fetch updated conversation
+                updated_conversation = storage.get_conversation_by_id(conversation_id)
+
+                logger.info(
+                    f"User {user.username} updated conversation {conversation_id} via WebSocket"
+                )
+
+                await websocket.send_json(
+                    {
+                        "type": "conversation_updated",
+                        "conversation": ConversationResponse.from_conversation(
+                            updated_conversation
+                        ).model_dump()
+                        if updated_conversation
+                        else None,
+                    }
+                )
+
+            elif msg_type == "delete_conversation":
+                # Delete a conversation
+                conversation_id = data.get("conversation_id")
+
+                if not conversation_id:
+                    await websocket.send_json(
+                        {"type": "error", "error": "Missing conversation_id field"}
+                    )
+                    continue
+
+                conv_to_delete = storage.get_conversation_by_id(conversation_id)
+
+                if not conv_to_delete:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "error": f"Conversation {conversation_id} not found",
+                        }
+                    )
+                    continue
+
+                # Only the creator or admins can delete the conversation
+                if not user.admin and conv_to_delete.created_by_username != user.username:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "error": "You can only delete your own conversations",
+                        }
+                    )
+                    continue
+
+                success = storage.delete_conversation(conversation_id)
+
+                if not success:
+                    await websocket.send_json(
+                        {"type": "error", "error": "Failed to delete conversation"}
+                    )
+                    continue
+
+                if user.admin and conversation.created_by_username != user.username:
+                    logger.info(
+                        f"Admin {user.username} deleted conversation {conversation_id} "
+                        f"(created by {conversation.created_by_username}) via WebSocket"
+                    )
+                else:
+                    logger.info(
+                        f"User {user.username} deleted conversation {conversation_id} via WebSocket"
+                    )
+
+                await websocket.send_json(
+                    {
+                        "type": "conversation_deleted",
+                        "conversation_id": conversation_id,
+                    }
+                )
+
+            elif msg_type == "delete_message":
+                # Delete a message (admins only)
+                if not user.admin:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "error": "Only admins can delete messages",
+                        }
+                    )
+                    continue
+
+                message_id = data.get("message_id")
+
+                if not message_id:
+                    await websocket.send_json(
+                        {"type": "error", "error": "Missing message_id field"}
+                    )
+                    continue
+
+                # Check if message exists
+                msg_to_delete = storage.get_message_by_id(message_id)
+                if not msg_to_delete:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "error": f"Message {message_id} not found",
+                        }
+                    )
+                    continue
+
+                # Delete the message
+                success = storage.delete_message(message_id)
+
+                if not success:
+                    await websocket.send_json(
+                        {"type": "error", "error": "Failed to delete message"}
+                    )
+                    continue
+
+                logger.info(
+                    f"Admin {user.username} deleted message {message_id} "
+                    f"(from {message.from_username}) via WebSocket"
+                )
+
+                await websocket.send_json(
+                    {
+                        "type": "message_deleted",
+                        "message_id": message_id,
                     }
                 )
 

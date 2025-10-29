@@ -974,6 +974,103 @@ def test_admin_delete_message_without_admin(client, registered_user):
     assert response.status_code == 403
 
 
+def test_admin_delete_message_websocket(client, registered_user, registered_admin):
+    """Test admin can delete any message via WebSocket."""
+    user_api_key = registered_user["api_key"]
+    admin_api_key = registered_admin["api_key"]
+
+    # User sends a message
+    response = client.post(
+        "/messages",
+        json={"content": "Test message to be deleted"},
+        headers={"X-API-Key": user_api_key},
+    )
+    assert response.status_code == 201
+    message_id = response.json()["id"]
+
+    # Admin deletes the message via WebSocket
+    with client.websocket_connect(f"/ws?api_key={admin_api_key}") as websocket:
+        websocket.send_json(
+            {
+                "type": "delete_message",
+                "message_id": message_id,
+            }
+        )
+
+        response = websocket.receive_json()
+        assert response["type"] == "message_deleted"
+        assert response["message_id"] == message_id
+
+    # Verify the message was deleted by trying to get messages
+    response = client.get("/messages", headers={"X-API-Key": user_api_key})
+    assert response.status_code == 200
+    messages = response.json()["messages"]
+    # The message should not be in the list
+    message_ids = [msg["id"] for msg in messages]
+    assert message_id not in message_ids
+
+
+def test_admin_delete_message_websocket_not_found(client, registered_admin):
+    """Test admin gets error when deleting non-existent message via WebSocket."""
+    admin_api_key = registered_admin["api_key"]
+    fake_uuid = "00000000-0000-0000-0000-000000000000"
+
+    with client.websocket_connect(f"/ws?api_key={admin_api_key}") as websocket:
+        websocket.send_json(
+            {
+                "type": "delete_message",
+                "message_id": fake_uuid,
+            }
+        )
+
+        response = websocket.receive_json()
+        assert response["type"] == "error"
+        assert "not found" in response["error"].lower()
+
+
+def test_admin_delete_message_websocket_missing_id(client, registered_admin):
+    """Test admin gets error when message_id is missing via WebSocket."""
+    admin_api_key = registered_admin["api_key"]
+
+    with client.websocket_connect(f"/ws?api_key={admin_api_key}") as websocket:
+        websocket.send_json(
+            {
+                "type": "delete_message",
+            }
+        )
+
+        response = websocket.receive_json()
+        assert response["type"] == "error"
+        assert "missing" in response["error"].lower()
+
+
+def test_non_admin_cannot_delete_message_websocket(client, registered_user):
+    """Test non-admin user cannot delete messages via WebSocket."""
+    user_api_key = registered_user["api_key"]
+
+    # User sends a message
+    response = client.post(
+        "/messages",
+        json={"content": "Test message"},
+        headers={"X-API-Key": user_api_key},
+    )
+    assert response.status_code == 201
+    message_id = response.json()["id"]
+
+    # User tries to delete via WebSocket (should fail)
+    with client.websocket_connect(f"/ws?api_key={user_api_key}") as websocket:
+        websocket.send_json(
+            {
+                "type": "delete_message",
+                "message_id": message_id,
+            }
+        )
+
+        response = websocket.receive_json()
+        assert response["type"] == "error"
+        assert "admin" in response["error"].lower()
+
+
 def test_get_user_profile(client, registered_user, registered_user2):
     """Test getting a public user profile."""
     headers = {"X-API-Key": registered_user["api_key"]}

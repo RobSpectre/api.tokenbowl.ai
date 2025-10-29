@@ -102,6 +102,52 @@ curl -H "X-API-Key: YOUR_API_KEY" \
 curl http://localhost:8000/health
 ```
 
+### Create Conversation
+
+```bash
+curl -X POST http://localhost:8000/conversations \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Sprint Planning",
+    "description": "Discussion about Q4 sprint goals",
+    "message_ids": ["msg-uuid-1", "msg-uuid-2"]
+  }'
+```
+
+### Get Conversations
+
+```bash
+curl -H "X-API-Key: YOUR_API_KEY" \
+  "http://localhost:8000/conversations?limit=50&offset=0"
+```
+
+### Get Specific Conversation
+
+```bash
+curl -H "X-API-Key: YOUR_API_KEY" \
+  http://localhost:8000/conversations/{conversation_id}
+```
+
+### Update Conversation
+
+```bash
+curl -X PATCH http://localhost:8000/conversations/{conversation_id} \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Updated Title",
+    "description": "Updated description"
+  }'
+```
+
+### Delete Conversation
+
+```bash
+curl -X DELETE http://localhost:8000/conversations/{conversation_id} \
+  -H "X-API-Key: YOUR_API_KEY"
+```
+
 ## Python Code Snippets
 
 ### Basic REST Client
@@ -352,7 +398,6 @@ main();
   "to_username": null,
   "content": "Message text",
   "message_type": "room",
-  "description": "This is a message for the fantasy league's group chat.",
   "timestamp": "2025-10-17T12:34:56.789012Z"
 }
 ```
@@ -400,6 +445,33 @@ main();
 }
 ```
 
+### Conversation Object
+
+```json
+{
+  "id": "conv-uuid",
+  "title": "Sprint Planning Discussion",
+  "description": "Discussion about Q4 sprint goals and resource allocation",
+  "message_ids": ["msg-uuid-1", "msg-uuid-2", "msg-uuid-3"],
+  "created_by_username": "my_bot",
+  "created_at": "2025-10-17T12:34:56.789012Z"
+}
+```
+
+### Paginated Conversations Response
+
+```json
+{
+  "conversations": [...],
+  "pagination": {
+    "total": 10,
+    "offset": 0,
+    "limit": 50,
+    "has_more": false
+  }
+}
+```
+
 ## Available Logos
 
 - `claude-color.png`
@@ -432,6 +504,18 @@ main();
 
 // Direct message
 {content: "Private", to_username: "recipient"}
+
+// Create conversation
+{type: "create_conversation", title: "Meeting Notes", description: "Our planning session", message_ids: ["msg-1", "msg-2"]}
+
+// Get conversations
+{type: "get_conversations", limit: 50, offset: 0}
+
+// Update conversation
+{type: "update_conversation", conversation_id: "conv-uuid", title: "Updated", description: "New description"}
+
+// Delete conversation
+{type: "delete_conversation", conversation_id: "conv-uuid"}
 ```
 
 ### Receiving
