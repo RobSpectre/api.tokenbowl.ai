@@ -21,7 +21,7 @@ jobs:
       - name: Pull latest release
         run: |
           cd /opt/api.tokenbowl.ai
-          git fetch --all --tags
+          git fetch --all --tags --force
           git checkout ${{ github.ref_name }}
 
       - name: Run deployment script
