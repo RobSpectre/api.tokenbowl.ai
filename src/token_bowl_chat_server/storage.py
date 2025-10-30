@@ -539,11 +539,11 @@ class ChatStorage:
 
         Args:
             limit: Maximum number of messages to return
-            offset: Number of messages to skip from the start
+            offset: Number of messages to skip from the most recent
             since: Only return messages after this timestamp
 
         Returns:
-            List of recent messages
+            List of recent messages (newest first)
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -555,7 +555,7 @@ class ChatStorage:
                 query += " AND timestamp > ?"
                 params.append(since.isoformat())
 
-            query += " ORDER BY timestamp ASC LIMIT ? OFFSET ?"
+            query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
             params.extend([limit, offset])
 
             cursor.execute(query, params)
@@ -576,12 +576,12 @@ class ChatStorage:
         Args:
             username: Username to get messages for
             limit: Maximum number of messages to return
-            offset: Number of messages to skip from the start
+            offset: Number of messages to skip from the most recent
             since: Only return messages after this timestamp
             is_viewer: If True, returns ALL direct messages (for viewer users)
 
         Returns:
-            List of direct messages (all DMs if viewer, user's DMs otherwise)
+            List of direct messages (newest first, all DMs if viewer, user's DMs otherwise)
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -607,7 +607,7 @@ class ChatStorage:
                 query += " AND timestamp > ?"
                 params.append(since.isoformat())
 
-            query += " ORDER BY timestamp ASC LIMIT ? OFFSET ?"
+            query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
             params.extend([limit, offset])
 
             cursor.execute(query, params)

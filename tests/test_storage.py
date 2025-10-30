@@ -102,11 +102,11 @@ def test_message_history_limit():
         )
         storage.add_message(message)
 
-    # Should only keep the last 5
+    # Should only keep the last 5 (newest first)
     messages = storage.get_recent_messages(limit=100)
     assert len(messages) == 5
-    assert messages[0].content == "Message 5"
-    assert messages[4].content == "Message 9"
+    assert messages[0].content == "Message 9"
+    assert messages[4].content == "Message 5"
 
 
 def test_get_recent_messages():
@@ -148,17 +148,17 @@ def test_get_recent_messages_with_limit():
         )
         storage.add_message(message)
 
-    # Get first 3 messages (default offset=0)
+    # Get first 3 messages (default offset=0) - newest first
     messages = storage.get_recent_messages(limit=3)
     assert len(messages) == 3
-    assert messages[0].content == "Message 0"
-    assert messages[2].content == "Message 2"
+    assert messages[0].content == "Message 9"
+    assert messages[2].content == "Message 7"
 
     # Get messages with offset
     messages = storage.get_recent_messages(limit=3, offset=7)
     assert len(messages) == 3
-    assert messages[0].content == "Message 7"
-    assert messages[2].content == "Message 9"
+    assert messages[0].content == "Message 2"
+    assert messages[2].content == "Message 0"
 
 
 def test_get_recent_messages_since():

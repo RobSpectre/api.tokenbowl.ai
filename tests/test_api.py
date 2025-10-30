@@ -147,8 +147,8 @@ def test_get_messages(client, registered_user):
     assert "pagination" in data
     messages = data["messages"]
     assert len(messages) == 3
-    assert messages[0]["content"] == "Message 0"
-    assert messages[2]["content"] == "Message 2"
+    assert messages[0]["content"] == "Message 2"
+    assert messages[2]["content"] == "Message 0"
     assert data["pagination"]["total"] == 3
     assert data["pagination"]["offset"] == 0
     assert data["pagination"]["limit"] == 50
@@ -173,9 +173,9 @@ def test_get_messages_with_limit(client, registered_user):
     data = response.json()
     messages = data["messages"]
     assert len(messages) == 2
-    # Should get the first 2 (offset=0, limit=2)
-    assert messages[0]["content"] == "Message 0"
-    assert messages[1]["content"] == "Message 1"
+    # Should get the most recent 2 (offset=0, limit=2)
+    assert messages[0]["content"] == "Message 4"
+    assert messages[1]["content"] == "Message 3"
     assert data["pagination"]["total"] == 5
     assert data["pagination"]["has_more"] is True
 
@@ -225,14 +225,14 @@ def test_get_messages_with_pagination(client, registered_user):
             headers=headers,
         )
 
-    # Get first page (offset=0, limit=3)
+    # Get first page (offset=0, limit=3) - newest first
     response = client.get("/messages?offset=0&limit=3", headers=headers)
     assert response.status_code == 200
     data = response.json()
     messages = data["messages"]
     assert len(messages) == 3
-    assert messages[0]["content"] == "Message 0"
-    assert messages[2]["content"] == "Message 2"
+    assert messages[0]["content"] == "Message 9"
+    assert messages[2]["content"] == "Message 7"
     assert data["pagination"]["total"] == 10
     assert data["pagination"]["offset"] == 0
     assert data["pagination"]["limit"] == 3
@@ -244,8 +244,8 @@ def test_get_messages_with_pagination(client, registered_user):
     data = response.json()
     messages = data["messages"]
     assert len(messages) == 3
-    assert messages[0]["content"] == "Message 3"
-    assert messages[2]["content"] == "Message 5"
+    assert messages[0]["content"] == "Message 6"
+    assert messages[2]["content"] == "Message 4"
     assert data["pagination"]["offset"] == 3
     assert data["pagination"]["has_more"] is True
 
@@ -255,7 +255,7 @@ def test_get_messages_with_pagination(client, registered_user):
     data = response.json()
     messages = data["messages"]
     assert len(messages) == 1  # Only 1 message left
-    assert messages[0]["content"] == "Message 9"
+    assert messages[0]["content"] == "Message 0"
     assert data["pagination"]["offset"] == 9
     assert data["pagination"]["has_more"] is False
 
@@ -273,14 +273,14 @@ def test_get_direct_messages_with_pagination(client, registered_user, registered
             headers=headers1,
         )
 
-    # Get first page for user 2
+    # Get first page for user 2 - newest first
     response = client.get("/messages/direct?offset=0&limit=2", headers=headers2)
     assert response.status_code == 200
     data = response.json()
     messages = data["messages"]
     assert len(messages) == 2
-    assert messages[0]["content"] == "DM 0"
-    assert messages[1]["content"] == "DM 1"
+    assert messages[0]["content"] == "DM 4"
+    assert messages[1]["content"] == "DM 3"
     assert data["pagination"]["total"] == 5
     assert data["pagination"]["has_more"] is True
 
@@ -1242,14 +1242,14 @@ def test_websocket_get_messages_with_pagination(client, registered_user):
         )
 
     with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as websocket:
-        # Request first page
+        # Request first page - newest first
         websocket.send_json({"type": "get_messages", "limit": 3, "offset": 0})
         data = websocket.receive_json()
 
         assert data["type"] == "messages"
         assert len(data["messages"]) == 3
-        assert data["messages"][0]["content"] == "Message 0"
-        assert data["messages"][2]["content"] == "Message 2"
+        assert data["messages"][0]["content"] == "Message 9"
+        assert data["messages"][2]["content"] == "Message 7"
         assert data["pagination"]["total"] == 10
         assert data["pagination"]["offset"] == 0
         assert data["pagination"]["limit"] == 3
@@ -1260,7 +1260,7 @@ def test_websocket_get_messages_with_pagination(client, registered_user):
         data = websocket.receive_json()
 
         assert len(data["messages"]) == 3
-        assert data["messages"][0]["content"] == "Message 3"
+        assert data["messages"][0]["content"] == "Message 6"
         assert data["pagination"]["offset"] == 3
         assert data["pagination"]["has_more"] is True
 
