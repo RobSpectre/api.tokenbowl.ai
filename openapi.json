@@ -2423,6 +2423,60 @@
           }
         }
       }
+    },
+    "/admin/websocket/connections": {
+      "get": {
+        "summary": "Get Websocket Connections",
+        "description": "Get WebSocket connection statistics for all connected users.\n\nReturns:\n    Dictionary with connection statistics\n\nRaises:\n    HTTPException: If user is not an admin",
+        "operationId": "get_websocket_connections_admin_websocket_connections_get",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Websocket Connections Admin Websocket Connections Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {

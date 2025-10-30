@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
@@ -51,6 +52,7 @@ from .storage import storage
 from .stytch_client import stytch_client
 from .webhook import webhook_delivery
 from .websocket import connection_manager, websocket_auth
+from .websocket_heartbeat import heartbeat_manager
 
 logger = logging.getLogger(__name__)
 
@@ -1994,6 +1996,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             # Receive data from client
             data = await websocket.receive_json()
 
+            # Update activity timestamp for this connection
+            heartbeat_manager.update_activity(user.username)
+
             # Determine message type (default to "message" for backward compatibility)
             msg_type = data.get("type", "message")
 
@@ -2805,6 +2810,11 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     }
                 )
 
+            elif msg_type == "pong":
+                # Handle pong response from client
+                heartbeat_manager.update_pong_received(user.username)
+                logger.debug(f"Received pong from {user.username}")
+
             else:
                 await websocket.send_json(
                     {"type": "error", "error": f"Unknown message type: {msg_type}"}
@@ -2826,3 +2836,29 @@ async def health_check() -> dict[str, str]:
         Health status
     """
     return {"status": "healthy"}
+
+
+@router.get("/admin/websocket/connections", response_model=dict[str, Any])
+async def get_websocket_connections(
+    _admin_user: User = Depends(get_current_admin),
+) -> dict[str, Any]:
+    """Get WebSocket connection statistics for all connected users.
+
+    Returns:
+        Dictionary with connection statistics
+
+    Raises:
+        HTTPException: If user is not an admin
+    """
+    connected_users = connection_manager.get_connected_users()
+    connections = []
+
+    for username in connected_users:
+        stats = heartbeat_manager.get_connection_stats(username)
+        if stats:
+            connections.append(stats)
+
+    return {
+        "total_connections": len(connected_users),
+        "connections": connections,
+    }

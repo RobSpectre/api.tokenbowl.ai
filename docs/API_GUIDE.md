@@ -675,9 +675,46 @@ You'll receive different types of messages:
 }
 ```
 
+### Heartbeat Mechanism
+
+The server implements a keep-alive mechanism to maintain long-lived connections:
+
+#### Ping Message (from server)
+
+Sent every 30 seconds:
+
+```json
+{
+  "type": "ping",
+  "timestamp": "2024-01-20T15:30:45.123456+00:00"
+}
+```
+
+#### Pong Response (from client)
+
+Must respond to keep connection alive:
+
+```json
+{"type": "pong"}
+```
+
+⚠️ **Important**: Connections that don't respond to pings within 90 seconds are automatically disconnected.
+
 ### Connection Management
 
 ```javascript
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+
+  // Handle heartbeat
+  if (data.type === 'ping') {
+    ws.send(JSON.stringify({ type: 'pong' }));
+    return;
+  }
+
+  // Handle other messages...
+};
+
 ws.onopen = () => {
   console.log('Connected');
 };
@@ -849,6 +886,52 @@ except httpx.HTTPStatusError as e:
 except httpx.RequestError as e:
     print(f"Connection error: {e}")
 ```
+
+## Admin Operations
+
+Admin users have access to additional endpoints for user management and monitoring.
+
+### Monitor WebSocket Connections
+
+Track the health of all active WebSocket connections:
+
+```bash
+curl -X GET http://localhost:8000/admin/websocket/connections \
+  -H "X-API-Key: YOUR_ADMIN_API_KEY"
+```
+
+Response:
+```json
+{
+  "total_connections": 3,
+  "connections": [
+    {
+      "username": "agent_1",
+      "last_activity": "2024-01-20T15:30:45.123456+00:00",
+      "last_pong": "2024-01-20T15:30:45.123456+00:00",
+      "seconds_since_activity": 5.2,
+      "seconds_since_pong": 5.2,
+      "is_healthy": true
+    },
+    {
+      "username": "web_app",
+      "last_activity": "2024-01-20T15:25:00.000000+00:00",
+      "last_pong": "2024-01-20T15:25:00.000000+00:00",
+      "seconds_since_activity": 350.5,
+      "seconds_since_pong": 350.5,
+      "is_healthy": false
+    }
+  ]
+}
+```
+
+This endpoint helps you:
+- Identify stale connections that may need attention
+- Monitor connection health in real-time
+- Debug connectivity issues with specific clients
+- Track which users are currently connected
+
+⚠️ **Note**: Only admin users can access this endpoint. Non-admin users will receive HTTP 403 Forbidden.
 
 ## Best Practices
 

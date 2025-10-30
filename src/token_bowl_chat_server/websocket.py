@@ -6,6 +6,7 @@ from fastapi import WebSocket
 
 from .auth import validate_api_key
 from .models import Message, MessageResponse, User
+from .websocket_heartbeat import heartbeat_manager
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,11 @@ class ConnectionManager:
         """
         await websocket.accept()
         self.active_connections[user.username] = websocket
+
+        # Start heartbeat monitoring
+        heartbeat_manager.track_connection(user.username, websocket)
+        heartbeat_manager.start_heartbeat(user.username)
+
         client_host = websocket.client.host if websocket.client else "unknown"
         logger.info(f"WebSocket CONNECTED - user: {user.username}, client: {client_host}")
 
@@ -37,6 +43,10 @@ class ConnectionManager:
         """
         if username in self.active_connections:
             del self.active_connections[username]
+
+            # Stop heartbeat monitoring
+            heartbeat_manager.untrack_connection(username)
+
             logger.info(f"WebSocket DISCONNECTED - user: {username}")
 
     async def send_message(self, username: str, message: Message) -> bool:
@@ -145,6 +155,19 @@ class ConnectionManager:
             True if user is connected, False otherwise
         """
         return username in self.active_connections
+
+    def is_connection_healthy(self, username: str) -> bool:
+        """Check if a user's connection is healthy.
+
+        Args:
+            username: Username to check
+
+        Returns:
+            True if connection exists and is healthy, False otherwise
+        """
+        if username not in self.active_connections:
+            return False
+        return heartbeat_manager.is_connection_healthy(username)
 
 
 # Global connection manager instance

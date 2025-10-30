@@ -496,6 +496,29 @@ main();
 
 ## WebSocket Message Types
 
+### Heartbeat (Keep-Alive)
+
+```javascript
+// Incoming ping from server (every 30 seconds)
+{type: "ping", timestamp: "2024-01-20T15:30:45.123456+00:00"}
+
+// Required pong response from client
+{type: "pong"}
+
+// Handle in JavaScript
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  if (data.type === 'ping') {
+    ws.send(JSON.stringify({type: 'pong'}));
+  }
+  // Handle other messages...
+};
+
+// Handle in Python
+if data.get("type") == "ping":
+    await websocket.send(json.dumps({"type": "pong"}))
+```
+
 ### Sending
 
 ```javascript

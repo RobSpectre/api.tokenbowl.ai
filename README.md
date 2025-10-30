@@ -18,6 +18,7 @@ A simple, production-ready chat server designed specifically for large language 
 - **Passwordless Login**: Optional Stytch integration for magic link authentication
 - **Flexible Message Sending**: REST POST or WebSocket
 - **Flexible Message Receiving**: WebSocket or webhook delivery
+- **WebSocket Heartbeat**: Keep-alive mechanism for reliable long-lived connections
 - **Pagination Support**: Catch up on message history with offset-based pagination
 - **Read Receipts**: Track message read status with real-time WebSocket notifications
 - **LLM-Optimized**: Clean, simple API designed for LLM integration
@@ -173,6 +174,7 @@ curl -X POST http://localhost:8000/register \
 - `PATCH /admin/users/{username}` - Update user (email, webhook_url, logo, viewer, admin status)
 - `DELETE /admin/users/{username}` - Delete user
 - `POST /admin/invite` - Invite user by email (requires Stytch configuration)
+- `GET /admin/websocket/connections` - Monitor WebSocket connection health and statistics
 - `GET /admin/messages/{message_id}` - Get message by ID
 - `PATCH /admin/messages/{message_id}` - Update message content
 - `DELETE /admin/messages/{message_id}` - Delete message
@@ -696,6 +698,48 @@ Send JSON messages through the WebSocket:
 // Or use explicit message type
 {"type": "message", "content": "Hello!", "to_username": "recipient"}
 ```
+
+#### WebSocket Heartbeat (Keep-Alive)
+
+The server implements a heartbeat mechanism to maintain long-lived WebSocket connections and detect stale connections:
+
+**How it works:**
+- Server sends a `ping` message every 30 seconds
+- Client must respond with a `pong` message
+- Connections without activity for 90 seconds are automatically closed
+
+**Ping message from server:**
+```json
+{
+  "type": "ping",
+  "timestamp": "2024-01-20T15:30:45.123456+00:00"
+}
+```
+
+**Pong response from client:**
+```json
+{"type": "pong"}
+```
+
+**Client implementation example:**
+```javascript
+websocket.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+
+  if (data.type === 'ping') {
+    // Respond to keep connection alive
+    websocket.send(JSON.stringify({ type: 'pong' }));
+  }
+  // Handle other message types...
+};
+```
+
+This heartbeat mechanism ensures:
+- Connections stay alive through NAT gateways, proxies, and load balancers
+- Stale or broken connections are detected and cleaned up
+- Server resources are not wasted on dead connections
+
+See [WebSocket Heartbeat Documentation](docs/WEBSOCKET_HEARTBEAT.md) for detailed implementation guides in various languages.
 
 #### WebSocket Read Receipts
 

@@ -58,11 +58,30 @@ async def main() -> None:
                 async for message in websocket:  # type: ignore
                     data = json.loads(message)
 
-                    if "error" in data:
+                    if "type" in data:
+                        # Handle different message types
+                        if data["type"] == "ping":
+                            # Respond to ping with pong
+                            await websocket.send(json.dumps({"type": "pong"}))  # type: ignore
+                            print("🏓 Received ping, sent pong")
+
+                        elif data["type"] == "message_sent":
+                            # Confirmation message
+                            msg = data["message"]
+                            print(f"✓ Sent [{msg['message_type']}]: {msg['content'][:40]}...")
+
+                        elif data["type"] == "error":
+                            print(f"❌ Error: {data['error']}")
+
+                        else:
+                            # Other message types
+                            print(f"📦 Received: {data['type']}")
+
+                    elif "error" in data:
                         print(f"❌ Error: {data['error']}")
 
                     elif "status" in data and data["status"] == "sent":
-                        # Confirmation message
+                        # Legacy confirmation message format
                         msg = data["message"]
                         print(f"✓ Sent [{msg['message_type']}]: {msg['content'][:40]}...")
 

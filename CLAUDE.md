@@ -120,7 +120,9 @@ Failure to do this causes schema drift where the code expects columns/tables tha
 
 **storage.py**: SQLite persistence layer with thread-safe connection management. Uses context manager pattern for connections. In-memory databases use a persistent connection; file-based databases create temporary connections per operation.
 
-**websocket.py**: WebSocket connection management via `ConnectionManager` singleton. Tracks active connections and handles broadcasting.
+**websocket.py**: WebSocket connection management via `ConnectionManager` singleton. Tracks active connections and handles broadcasting. Integrates with heartbeat mechanism for connection health monitoring.
+
+**websocket_heartbeat.py**: Implements keep-alive mechanism for WebSocket connections. Sends ping messages every 30 seconds, expects pong responses, and disconnects stale connections after 90 seconds of inactivity. Prevents silent connection drops from network intermediaries.
 
 **webhook.py**: Async webhook delivery with retry logic and exponential backoff. The `WebhookDelivery` singleton uses httpx for async HTTP requests.
 
@@ -221,6 +223,7 @@ Environment variables (all optional):
 
 - **WebSocket authentication**: Dual auth support - API key via query param `?api_key=KEY` or `X-API-Key` header, OR Stytch session token via `Authorization: Bearer <token>` header
 - **REST authentication**: Dual auth support - API key via `X-API-Key` header OR Stytch session token via `Authorization: Bearer <token>` header (handled by FastAPI dependency in `get_current_user`)
+- **WebSocket heartbeat**: Server sends ping messages every 30 seconds; clients must respond with pong to maintain connection. Stale connections (no activity for 90s) are automatically disconnected. See `websocket_heartbeat.py` and `docs/WEBSOCKET_HEARTBEAT.md`.
 - **Message timestamps**: Always use UTC (`datetime.now(UTC)`)
 - **Pagination**: All message endpoints support `limit`, `offset`, and `since` parameters
 - **CORS**: Currently allows all origins (`allow_origins=["*"]`) - configure for production

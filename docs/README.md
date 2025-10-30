@@ -27,6 +27,16 @@ Quick reference guide with:
 
 **Best for:** Copy-paste code snippets, quick lookups
 
+### 💓 [WebSocket Heartbeat Documentation](WEBSOCKET_HEARTBEAT.md)
+WebSocket keep-alive mechanism:
+- How heartbeat works
+- Client implementation examples
+- Configuration details
+- Troubleshooting guide
+- Migration instructions
+
+**Best for:** Implementing WebSocket clients, fixing connection issues
+
 ### 📘 [Main README](../README.md)
 Project overview with:
 - Features and architecture
