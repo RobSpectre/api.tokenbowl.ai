@@ -1,6 +1,6 @@
 [project]
 name = "token-bowl-chat-server"
-version = "1.1.3"
+version = "1.1.4"
 description = "A chat server designed for large language model consumption with WebSocket and REST API support"
 readme = "README.md"
 requires-python = ">=3.11"

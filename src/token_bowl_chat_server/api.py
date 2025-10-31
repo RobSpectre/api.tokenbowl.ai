@@ -2845,20 +2845,22 @@ async def get_websocket_connections(
     """Get WebSocket connection statistics for all connected users.
 
     Returns:
-        Dictionary with connection statistics
+        Dictionary with connection statistics including all connections per user
 
     Raises:
         HTTPException: If user is not an admin
     """
     connected_users = connection_manager.get_connected_users()
-    connections = []
+    all_connections = []
 
     for username in connected_users:
-        stats = heartbeat_manager.get_connection_stats(username)
-        if stats:
-            connections.append(stats)
+        user_stats = heartbeat_manager.get_connection_stats(username)
+        if user_stats:
+            # user_stats is now a list of connection stats for this user
+            all_connections.extend(user_stats)
 
     return {
-        "total_connections": len(connected_users),
-        "connections": connections,
+        "total_users": len(connected_users),
+        "total_connections": len(all_connections),
+        "connections": all_connections,
     }
