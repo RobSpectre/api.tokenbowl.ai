@@ -16,7 +16,7 @@ class ConnectionManager:
 
     def __init__(self) -> None:
         """Initialize connection manager."""
-        self.active_connections: dict[str, WebSocket] = {}  # username -> WebSocket
+        self.active_connections: dict[str, list[WebSocket]] = {}  # username -> list of WebSockets
 
     async def connect(self, websocket: WebSocket, user: User) -> None:
         """Accept a WebSocket connection for a user.
@@ -26,84 +26,124 @@ class ConnectionManager:
             user: Authenticated user
         """
         await websocket.accept()
-        self.active_connections[user.username] = websocket
 
-        # Start heartbeat monitoring
+        # Add connection to the list for this user
+        if user.username not in self.active_connections:
+            self.active_connections[user.username] = []
+        self.active_connections[user.username].append(websocket)
+
+        # Start heartbeat monitoring for this specific connection
         heartbeat_manager.track_connection(user.username, websocket)
         heartbeat_manager.start_heartbeat(user.username)
 
         client_host = websocket.client.host if websocket.client else "unknown"
-        logger.info(f"WebSocket CONNECTED - user: {user.username}, client: {client_host}")
+        connection_count = len(self.active_connections[user.username])
+        logger.info(
+            f"WebSocket CONNECTED - user: {user.username}, client: {client_host}, connections: {connection_count}"
+        )
 
-    def disconnect(self, username: str) -> None:
-        """Remove a WebSocket connection.
+    def disconnect(self, username: str, websocket: WebSocket) -> None:
+        """Remove a specific WebSocket connection for a user.
 
         Args:
-            username: Username to disconnect
+            username: Username of the connection
+            websocket: Specific WebSocket connection to remove
         """
         if username in self.active_connections:
-            del self.active_connections[username]
+            connections = self.active_connections[username]
+            if websocket in connections:
+                connections.remove(websocket)
 
-            # Stop heartbeat monitoring
-            heartbeat_manager.untrack_connection(username)
+                # If no more connections for this user, remove the entry
+                if not connections:
+                    del self.active_connections[username]
 
-            logger.info(f"WebSocket DISCONNECTED - user: {username}")
+                # Stop heartbeat monitoring for this specific connection
+                heartbeat_manager.untrack_connection(username, websocket)
+
+                remaining = len(self.active_connections.get(username, []))
+                logger.info(
+                    f"WebSocket DISCONNECTED - user: {username}, remaining connections: {remaining}"
+                )
 
     async def send_message(self, username: str, message: Message) -> bool:
-        """Send a message to a specific user via WebSocket.
+        """Send a message to all active connections for a user.
 
         Args:
             username: Username to send message to
             message: Message to send
 
         Returns:
-            True if message was sent successfully, False otherwise
+            True if message was sent to at least one connection, False otherwise
         """
-        websocket = self.active_connections.get(username)
-        if not websocket:
+        websockets = self.active_connections.get(username, [])
+        if not websockets:
             return False
 
-        try:
-            # Fetch sender and recipient user info for display
-            from .storage import storage
+        # Fetch sender and recipient user info for display
+        from .storage import storage
 
-            from_user = storage.get_user_by_username(message.from_username)
-            to_user = (
-                storage.get_user_by_username(message.to_username) if message.to_username else None
-            )
-            message_data = MessageResponse.from_message(
-                message, from_user=from_user, to_user=to_user
-            ).model_dump()
-            await websocket.send_json(message_data)
-            logger.debug(f"Sent message to {username} via WebSocket")
-            return True
-        except Exception as e:
-            logger.error(f"Error sending message to {username}: {e}")
-            self.disconnect(username)
-            return False
+        from_user = storage.get_user_by_username(message.from_username)
+        to_user = storage.get_user_by_username(message.to_username) if message.to_username else None
+        message_data = MessageResponse.from_message(
+            message, from_user=from_user, to_user=to_user
+        ).model_dump()
+
+        sent_count = 0
+        disconnected = []
+
+        # Send to all connections for this user
+        for websocket in websockets[:]:  # Create copy to iterate safely
+            try:
+                await websocket.send_json(message_data)
+                sent_count += 1
+                logger.debug(
+                    f"Sent message to {username} via WebSocket (connection {sent_count}/{len(websockets)})"
+                )
+            except Exception as e:
+                logger.error(f"Error sending message to {username} on connection: {e}")
+                disconnected.append(websocket)
+
+        # Clean up disconnected connections
+        for websocket in disconnected:
+            self.disconnect(username, websocket)
+
+        return sent_count > 0
 
     async def send_notification(self, username: str, notification: dict) -> bool:
-        """Send a notification to a specific user via WebSocket.
+        """Send a notification to all active connections for a user.
 
         Args:
             username: Username to send notification to
             notification: Notification data to send
 
         Returns:
-            True if notification was sent successfully, False otherwise
+            True if notification was sent to at least one connection, False otherwise
         """
-        websocket = self.active_connections.get(username)
-        if not websocket:
+        websockets = self.active_connections.get(username, [])
+        if not websockets:
             return False
 
-        try:
-            await websocket.send_json(notification)
-            logger.debug(f"Sent notification to {username} via WebSocket")
-            return True
-        except Exception as e:
-            logger.error(f"Error sending notification to {username}: {e}")
-            self.disconnect(username)
-            return False
+        sent_count = 0
+        disconnected = []
+
+        # Send to all connections for this user
+        for websocket in websockets[:]:  # Create copy to iterate safely
+            try:
+                await websocket.send_json(notification)
+                sent_count += 1
+                logger.debug(
+                    f"Sent notification to {username} via WebSocket (connection {sent_count}/{len(websockets)})"
+                )
+            except Exception as e:
+                logger.error(f"Error sending notification to {username} on connection: {e}")
+                disconnected.append(websocket)
+
+        # Clean up disconnected connections
+        for websocket in disconnected:
+            self.disconnect(username, websocket)
+
+        return sent_count > 0
 
     async def broadcast_to_room(
         self, message: Message, exclude_username: str | None = None
@@ -114,7 +154,7 @@ class ConnectionManager:
             message: Message to broadcast
             exclude_username: Username to exclude from broadcast (e.g., the sender)
         """
-        disconnected_users = []
+        disconnected_connections = []
 
         # Fetch sender user info for display
         from .storage import storage
@@ -122,20 +162,22 @@ class ConnectionManager:
         from_user = storage.get_user_by_username(message.from_username)
         message_data = MessageResponse.from_message(message, from_user=from_user).model_dump()
 
-        for username, websocket in self.active_connections.items():
+        for username, websockets in self.active_connections.items():
             if exclude_username and username == exclude_username:
                 continue
 
-            try:
-                await websocket.send_json(message_data)
-                logger.debug(f"Broadcasted message to {username}")
-            except Exception as e:
-                logger.error(f"Error broadcasting to {username}: {e}")
-                disconnected_users.append(username)
+            # Send to all connections for each user
+            for websocket in websockets[:]:  # Create copy to iterate safely
+                try:
+                    await websocket.send_json(message_data)
+                    logger.debug(f"Broadcasted message to {username}")
+                except Exception as e:
+                    logger.error(f"Error broadcasting to {username}: {e}")
+                    disconnected_connections.append((username, websocket))
 
-        # Clean up disconnected users
-        for username in disconnected_users:
-            self.disconnect(username)
+        # Clean up disconnected connections
+        for username, websocket in disconnected_connections:
+            self.disconnect(username, websocket)
 
     def get_connected_users(self) -> list[str]:
         """Get list of currently connected usernames.
@@ -146,28 +188,33 @@ class ConnectionManager:
         return list(self.active_connections.keys())
 
     def is_connected(self, username: str) -> bool:
-        """Check if a user is currently connected.
+        """Check if a user has any active connections.
 
         Args:
             username: Username to check
 
         Returns:
-            True if user is connected, False otherwise
+            True if user has at least one connection, False otherwise
         """
-        return username in self.active_connections
+        return username in self.active_connections and len(self.active_connections[username]) > 0
 
     def is_connection_healthy(self, username: str) -> bool:
-        """Check if a user's connection is healthy.
+        """Check if a user has any healthy connections.
 
         Args:
             username: Username to check
 
         Returns:
-            True if connection exists and is healthy, False otherwise
+            True if user has at least one healthy connection, False otherwise
         """
         if username not in self.active_connections:
             return False
-        return heartbeat_manager.is_connection_healthy(username)
+
+        # Check if any connection is healthy
+        for websocket in self.active_connections[username]:
+            if heartbeat_manager.is_connection_healthy(username, websocket):
+                return True
+        return False
 
 
 # Global connection manager instance

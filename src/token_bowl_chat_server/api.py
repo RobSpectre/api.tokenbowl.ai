@@ -1996,8 +1996,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             # Receive data from client
             data = await websocket.receive_json()
 
-            # Update activity timestamp for this connection
-            heartbeat_manager.update_activity(user.username)
+            # Update activity timestamp for this specific connection
+            heartbeat_manager.update_activity(user.username, websocket)
 
             # Determine message type (default to "message" for backward compatibility)
             msg_type = data.get("type", "message")
@@ -2812,7 +2812,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
             elif msg_type == "pong":
                 # Handle pong response from client
-                heartbeat_manager.update_pong_received(user.username)
+                heartbeat_manager.update_pong_received(user.username, websocket)
                 logger.debug(f"Received pong from {user.username}")
 
             else:
@@ -2821,11 +2821,11 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 )
 
     except WebSocketDisconnect:
-        connection_manager.disconnect(user.username)
+        connection_manager.disconnect(user.username, websocket)
         logger.info(f"WebSocket disconnected normally - user: {user.username}")
     except Exception as e:
         logger.error(f"WebSocket ERROR - user: {user.username}, error: {e}")
-        connection_manager.disconnect(user.username)
+        connection_manager.disconnect(user.username, websocket)
 
 
 @router.get("/health")

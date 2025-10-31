@@ -25,7 +25,8 @@ async def test_connect(manager):
 
     websocket.accept.assert_called_once()
     assert "test_user" in manager.active_connections
-    assert manager.active_connections["test_user"] == websocket
+    assert websocket in manager.active_connections["test_user"]
+    assert len(manager.active_connections["test_user"]) == 1
 
 
 @pytest.mark.asyncio
@@ -39,14 +40,15 @@ async def test_disconnect(manager):
     assert "test_user" in manager.active_connections
 
     # Disconnect
-    manager.disconnect("test_user")
+    manager.disconnect("test_user", websocket)
     assert "test_user" not in manager.active_connections
 
 
 def test_disconnect_nonexistent_user(manager):
     """Test disconnecting a user that's not connected."""
     # Should not raise an error
-    manager.disconnect("nonexistent_user")
+    websocket = AsyncMock()
+    manager.disconnect("nonexistent_user", websocket)
     assert "nonexistent_user" not in manager.active_connections
 
 
@@ -188,9 +190,9 @@ def test_get_connected_users(manager):
     """Test getting list of connected users."""
     assert manager.get_connected_users() == []
 
-    # Add some users manually
-    manager.active_connections["user1"] = MagicMock()
-    manager.active_connections["user2"] = MagicMock()
+    # Add some users manually (as lists of connections)
+    manager.active_connections["user1"] = [MagicMock()]
+    manager.active_connections["user2"] = [MagicMock()]
 
     connected = manager.get_connected_users()
     assert len(connected) == 2
@@ -202,7 +204,8 @@ def test_is_connected(manager):
     """Test checking if user is connected."""
     assert manager.is_connected("user1") is False
 
-    manager.active_connections["user1"] = MagicMock()
+    # Add a connection for user1 (as a list)
+    manager.active_connections["user1"] = [MagicMock()]
 
     assert manager.is_connected("user1") is True
     assert manager.is_connected("user2") is False
