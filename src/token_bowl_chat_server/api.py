@@ -315,26 +315,24 @@ async def send_message(
         # Broadcast to all users except sender
         await connection_manager.broadcast_to_room(message, exclude_username=current_user.username)
 
-        # Send via webhooks to chat users who aren't connected via WebSocket
+        # Send via webhooks to all chat users who have webhook URLs configured
         # Viewers are excluded as they cannot receive direct messages
         chat_users = storage.get_chat_users()
         webhook_users = [
             user
             for user in chat_users
-            if user.webhook_url
-            and user.username != current_user.username
-            and not connection_manager.is_connected(user.username)
+            if user.webhook_url and user.username != current_user.username
         ]
         await webhook_delivery.broadcast_to_webhooks(message, webhook_users)
 
     else:
         # Direct message - recipient was already fetched above for validation
         if recipient:
-            # Try WebSocket first
-            sent_via_ws = await connection_manager.send_message(recipient.username, message)
+            # Send via WebSocket if connected
+            await connection_manager.send_message(recipient.username, message)
 
-            # If not sent via WebSocket, try webhook
-            if not sent_via_ws and recipient.webhook_url:
+            # Always send via webhook if configured
+            if recipient.webhook_url:
                 await webhook_delivery.deliver_message(recipient, message)
 
     return MessageResponse.from_message(message, from_user=current_user, to_user=recipient)
@@ -2072,14 +2070,10 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         message, exclude_username=user.username
                     )
 
-                    # Send via webhooks to chat users who aren't connected
+                    # Send via webhooks to all chat users who have webhook URLs configured
                     chat_users = storage.get_chat_users()
                     webhook_users = [
-                        u
-                        for u in chat_users
-                        if u.webhook_url
-                        and u.username != user.username
-                        and not connection_manager.is_connected(u.username)
+                        u for u in chat_users if u.webhook_url and u.username != user.username
                     ]
                     await webhook_delivery.broadcast_to_webhooks(message, webhook_users)
 
@@ -2087,11 +2081,11 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     # Direct message
                     recipient = storage.get_user_by_username(to_username)
                     if recipient:
-                        sent_via_ws = await connection_manager.send_message(
-                            recipient.username, message
-                        )
+                        # Send via WebSocket if connected
+                        await connection_manager.send_message(recipient.username, message)
 
-                        if not sent_via_ws and recipient.webhook_url:
+                        # Always send via webhook if configured
+                        if recipient.webhook_url:
                             await webhook_delivery.deliver_message(recipient, message)
 
                 # Send confirmation back to sender

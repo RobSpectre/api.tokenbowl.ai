@@ -1,5 +1,6 @@
 """Tests for WebSocket connection management."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -508,3 +509,87 @@ def test_websocket_direct_message_persists_to_database(
     assert found_message["from_username"] == registered_user["username"]
     assert found_message["to_username"] == registered_user2["username"]
     assert found_message["message_type"] == "direct"
+
+
+@pytest.mark.asyncio
+async def test_send_message_timeout(manager):
+    """Test that send_message handles timeout and disconnects the connection."""
+
+    # Create a websocket that hangs on send
+    async def slow_send(*args, **kwargs):
+        await asyncio.sleep(10)  # Longer than WEBSOCKET_SEND_TIMEOUT
+
+    websocket = AsyncMock()
+    websocket.send_json.side_effect = slow_send
+    user = User(username="test_user", api_key="a" * 64)
+    message = Message(
+        from_username="sender",
+        content="Test message",
+        message_type=MessageType.ROOM,
+    )
+
+    # Connect user
+    await manager.connect(websocket, user)
+
+    # Send message (should timeout and disconnect)
+    result = await manager.send_message("test_user", message)
+
+    assert result is False
+    # User should be disconnected after timeout
+    assert "test_user" not in manager.active_connections
+
+
+@pytest.mark.asyncio
+async def test_send_notification_timeout(manager):
+    """Test that send_notification handles timeout and disconnects the connection."""
+
+    # Create a websocket that hangs on send
+    async def slow_send(*args, **kwargs):
+        await asyncio.sleep(10)  # Longer than WEBSOCKET_SEND_TIMEOUT
+
+    websocket = AsyncMock()
+    websocket.send_json.side_effect = slow_send
+    user = User(username="test_user", api_key="a" * 64)
+    notification = {"type": "read_receipt", "message_id": "123", "read_by": "reader"}
+
+    # Connect user
+    await manager.connect(websocket, user)
+
+    # Send notification (should timeout and disconnect)
+    result = await manager.send_notification("test_user", notification)
+
+    assert result is False
+    # User should be disconnected after timeout
+    assert "test_user" not in manager.active_connections
+
+
+@pytest.mark.asyncio
+async def test_broadcast_to_room_timeout(manager):
+    """Test that broadcast_to_room handles timeout on one connection."""
+
+    # Create one websocket that hangs and one that works
+    async def slow_send(*args, **kwargs):
+        await asyncio.sleep(10)  # Longer than WEBSOCKET_SEND_TIMEOUT
+
+    websocket1 = AsyncMock()
+    websocket1.send_json.side_effect = slow_send
+    websocket2 = AsyncMock()
+    user1 = User(username="user1", api_key="a" * 64)
+    user2 = User(username="user2", api_key="b" * 64)
+    message = Message(
+        from_username="sender",
+        content="Broadcast message",
+        message_type=MessageType.ROOM,
+    )
+
+    # Connect users
+    await manager.connect(websocket1, user1)
+    await manager.connect(websocket2, user2)
+
+    # Broadcast (user1 should timeout, user2 should receive)
+    await manager.broadcast_to_room(message)
+
+    # user1 should be disconnected, user2 should receive
+    assert "user1" not in manager.active_connections
+    assert "user2" in manager.active_connections
+    websocket2.send_json.assert_called_once()
