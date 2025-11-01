@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     # Frontend URL for magic link redirects
     frontend_url: str = "http://localhost:3000"
 
+    # Centrifugo settings
+    enable_centrifugo: bool = False
+    centrifugo_api_url: str = "http://localhost:8001/api"
+    centrifugo_api_key: str = "your-api-key-change-in-production"
+    centrifugo_token_secret: str = "your-secret-key-change-in-production"
+    centrifugo_ws_url: str = "ws://localhost:8001/connection/websocket"
+
     @property
     def stytch_enabled(self) -> bool:
         """Check if Stytch is configured and enabled."""

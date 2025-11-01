@@ -312,8 +312,15 @@ async def send_message(
 
     # Deliver message via WebSocket and webhooks
     if message_type == MessageType.ROOM:
-        # Broadcast to all users except sender
+        # Broadcast to all users except sender via old WebSocket
         await connection_manager.broadcast_to_room(message, exclude_username=current_user.username)
+
+        # Publish to Centrifugo if enabled
+        if settings.enable_centrifugo:
+            from .centrifugo_client import get_centrifugo_client
+
+            centrifugo = get_centrifugo_client()
+            await centrifugo.publish_room_message(message, current_user)
 
         # Send via webhooks to all chat users who have webhook URLs configured
         # Viewers are excluded as they cannot receive direct messages
@@ -328,8 +335,15 @@ async def send_message(
     else:
         # Direct message - recipient was already fetched above for validation
         if recipient:
-            # Send via WebSocket if connected
+            # Send via old WebSocket if connected
             await connection_manager.send_message(recipient.username, message)
+
+            # Publish to Centrifugo if enabled
+            if settings.enable_centrifugo:
+                from .centrifugo_client import get_centrifugo_client
+
+                centrifugo = get_centrifugo_client()
+                await centrifugo.publish_direct_message(message, current_user, recipient)
 
             # Always send via webhook if configured
             if recipient.webhook_url:
@@ -2065,10 +2079,17 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
                 # Deliver message
                 if message_type == MessageType.ROOM:
-                    # Broadcast to all users except sender
+                    # Broadcast to all users except sender via old WebSocket
                     await connection_manager.broadcast_to_room(
                         message, exclude_username=user.username
                     )
+
+                    # Publish to Centrifugo if enabled
+                    if settings.enable_centrifugo:
+                        from .centrifugo_client import get_centrifugo_client
+
+                        centrifugo = get_centrifugo_client()
+                        await centrifugo.publish_room_message(message, user)
 
                     # Send via webhooks to all chat users who have webhook URLs configured
                     chat_users = storage.get_chat_users()
@@ -2081,8 +2102,15 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     # Direct message
                     recipient = storage.get_user_by_username(to_username)
                     if recipient:
-                        # Send via WebSocket if connected
+                        # Send via old WebSocket if connected
                         await connection_manager.send_message(recipient.username, message)
+
+                        # Publish to Centrifugo if enabled
+                        if settings.enable_centrifugo:
+                            from .centrifugo_client import get_centrifugo_client
+
+                            centrifugo = get_centrifugo_client()
+                            await centrifugo.publish_direct_message(message, user, recipient)
 
                         # Always send via webhook if configured
                         if recipient.webhook_url:
@@ -2820,6 +2848,45 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     except Exception as e:
         logger.error(f"WebSocket ERROR - user: {user.username}, error: {e}")
         connection_manager.disconnect(user.username, websocket)
+
+
+@router.get("/centrifugo/connection-token")
+async def get_centrifugo_connection_token(
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Get connection token for Centrifugo WebSocket.
+
+    Returns JWT token and connection information for connecting to Centrifugo.
+
+    Args:
+        current_user: Authenticated user
+
+    Returns:
+        Connection info with token and channels
+
+    Raises:
+        HTTPException: If Centrifugo is not enabled
+    """
+    if not settings.enable_centrifugo:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Centrifugo is not enabled on this server",
+        )
+
+    from .centrifugo_client import get_centrifugo_client
+
+    centrifugo = get_centrifugo_client()
+    token = centrifugo.generate_connection_token(current_user)
+
+    return {
+        "token": token,
+        "url": settings.centrifugo_ws_url,
+        "channels": [
+            f"user:{current_user.username}",  # Personal DMs
+            "room:main",  # Main chat room
+        ],
+        "user": current_user.username,
+    }
 
 
 @router.get("/health")

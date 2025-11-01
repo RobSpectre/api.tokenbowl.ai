@@ -39,7 +39,7 @@ class ConnectionManager:
 
         # Start heartbeat monitoring for this specific connection
         heartbeat_manager.track_connection(user.username, websocket)
-        heartbeat_manager.start_heartbeat(user.username)
+        heartbeat_manager.start_heartbeat(user.username, websocket)
 
         client_host = websocket.client.host if websocket.client else "unknown"
         connection_count = len(self.active_connections[user.username])
@@ -83,6 +83,9 @@ class ConnectionManager:
         """
         websockets = self.active_connections.get(username, [])
         if not websockets:
+            logger.info(
+                f"Cannot send direct message to {username} from {message.from_username}: no active connections"
+            )
             return False
 
         # Fetch sender and recipient user info for display
@@ -94,28 +97,37 @@ class ConnectionManager:
             message, from_user=from_user, to_user=to_user
         ).model_dump()
 
+        logger.info(
+            f"Sending direct message from {message.from_username} to {username} "
+            f"({len(websockets)} connections)"
+        )
+
         sent_count = 0
         disconnected = []
 
         # Send to all connections for this user
-        for websocket in websockets[:]:  # Create copy to iterate safely
+        for idx, websocket in enumerate(websockets[:]):  # Create copy to iterate safely
             try:
                 # Add timeout to prevent hanging on broken connections
                 await asyncio.wait_for(
                     websocket.send_json(message_data), timeout=WEBSOCKET_SEND_TIMEOUT
                 )
                 sent_count += 1
-                logger.debug(
-                    f"Sent message to {username} via WebSocket (connection {sent_count}/{len(websockets)})"
+                logger.info(
+                    f"✓ Sent direct message to {username} (connection {idx + 1}/{len(websockets)})"
                 )
             except TimeoutError:
                 logger.error(
-                    f"Timeout sending message to {username} on connection (connection likely broken)"
+                    f"✗ Timeout sending message to {username} (connection {idx + 1}/{len(websockets)}) - connection likely broken"
                 )
                 disconnected.append(websocket)
             except Exception as e:
-                logger.error(f"Error sending message to {username} on connection: {e}")
+                logger.error(
+                    f"✗ Error sending message to {username} (connection {idx + 1}/{len(websockets)}): {e}"
+                )
                 disconnected.append(websocket)
+
+        logger.info(f"Direct message send complete: {sent_count} sent, {len(disconnected)} failed")
 
         # Clean up disconnected connections
         for websocket in disconnected:
@@ -183,26 +195,44 @@ class ConnectionManager:
         from_user = storage.get_user_by_username(message.from_username)
         message_data = MessageResponse.from_message(message, from_user=from_user).model_dump()
 
+        # Log broadcast details
+        total_connections = sum(len(ws_list) for ws_list in self.active_connections.values())
+        logger.info(
+            f"Broadcasting message from {message.from_username} to {len(self.active_connections)} users "
+            f"({total_connections} total connections), excluding: {exclude_username or 'none'}"
+        )
+
+        sent_count = 0
         for username, websockets in self.active_connections.items():
             if exclude_username and username == exclude_username:
+                logger.debug(f"Skipping sender {username}")
                 continue
 
             # Send to all connections for each user
-            for websocket in websockets[:]:  # Create copy to iterate safely
+            for idx, websocket in enumerate(websockets[:]):  # Create copy to iterate safely
                 try:
                     # Add timeout to prevent hanging on broken connections
                     await asyncio.wait_for(
                         websocket.send_json(message_data), timeout=WEBSOCKET_SEND_TIMEOUT
                     )
-                    logger.debug(f"Broadcasted message to {username}")
+                    sent_count += 1
+                    logger.info(
+                        f"✓ Broadcasted message to {username} (connection {idx + 1}/{len(websockets)})"
+                    )
                 except TimeoutError:
                     logger.error(
-                        f"Timeout broadcasting to {username} on connection (connection likely broken)"
+                        f"✗ Timeout broadcasting to {username} (connection {idx + 1}/{len(websockets)}) - connection likely broken"
                     )
                     disconnected_connections.append((username, websocket))
                 except Exception as e:
-                    logger.error(f"Error broadcasting to {username}: {e}")
+                    logger.error(
+                        f"✗ Error broadcasting to {username} (connection {idx + 1}/{len(websockets)}): {e}"
+                    )
                     disconnected_connections.append((username, websocket))
+
+        logger.info(
+            f"Broadcast complete: {sent_count} messages sent, {len(disconnected_connections)} failed"
+        )
 
         # Clean up disconnected connections
         for username, websocket in disconnected_connections:

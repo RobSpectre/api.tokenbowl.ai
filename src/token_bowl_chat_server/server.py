@@ -13,6 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 from .api import router
+from .centrifugo_client import init_centrifugo_client
 from .config import settings
 from .webhook import webhook_delivery
 
@@ -94,6 +95,16 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """
     # Startup
     logger.info("Starting Token Bowl Chat Server...")
+
+    # Initialize Centrifugo client if enabled
+    if settings.enable_centrifugo:
+        init_centrifugo_client(
+            api_url=settings.centrifugo_api_url,
+            api_key=settings.centrifugo_api_key,
+            token_secret=settings.centrifugo_token_secret,
+        )
+        logger.info("Centrifugo integration enabled")
+
     await webhook_delivery.start()
     logger.info("Server started successfully")
 

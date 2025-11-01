@@ -1,0 +1,16 @@
+services:
+  centrifugo:
+    image: centrifugo/centrifugo:v5
+    container_name: token-bowl-centrifugo
+    ports:
+      - "8001:8000"  # HTTP API and WebSocket
+    volumes:
+      - ./centrifugo-config.json:/etc/centrifugo/config.json:ro
+    command: centrifugo --config=/etc/centrifugo/config.json
+    restart: unless-stopped
+    networks:
+      - token-bowl-network
+
+networks:
+  token-bowl-network:
+    driver: bridge

@@ -1,0 +1,31 @@
+{
+  "token_hmac_secret_key": "your-secret-key-change-in-production",
+  "api_key": "your-api-key-change-in-production",
+  "admin_password": "admin",
+  "admin_secret": "admin-secret-change-in-production",
+  "allowed_origins": ["*"],
+  "log_level": "info",
+  "health": true,
+  "namespaces": [
+    {
+      "name": "room",
+      "publish": true,
+      "subscribe_to_publish": true,
+      "presence": true,
+      "join_leave": true,
+      "history_size": 100,
+      "history_ttl": "300s",
+      "history_recover": true
+    },
+    {
+      "name": "user",
+      "publish": false,
+      "subscribe_to_user": true,
+      "presence": true,
+      "join_leave": false,
+      "history_size": 50,
+      "history_ttl": "300s",
+      "history_recover": true
+    }
+  ]
+}
