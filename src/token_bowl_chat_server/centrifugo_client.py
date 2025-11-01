@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import jwt
 from cent import AsyncClient
+from cent.dto import DisconnectRequest, PublishRequest
 
 from .models import Message, MessageResponse, User
 
@@ -53,7 +54,8 @@ class CentrifugoClient:
         )
 
         try:
-            await self.client.publish(channel="room:main", data=message_data)  # type: ignore[call-arg]
+            request = PublishRequest(channel="room:main", data=message_data)
+            await self.client.publish(request)
             logger.info(f"Published room message to Centrifugo: {message.id}")
         except Exception as e:
             logger.error(f"Failed to publish room message to Centrifugo: {e}")
@@ -75,7 +77,8 @@ class CentrifugoClient:
 
         try:
             # Publish to user's personal channel
-            await self.client.publish(channel=f"user:{to_user.username}", data=message_data)  # type: ignore[call-arg]
+            request = PublishRequest(channel=f"user:{to_user.username}", data=message_data)
+            await self.client.publish(request)
             logger.info(f"Published direct message to Centrifugo for {to_user.username}")
         except Exception as e:
             logger.error(f"Failed to publish direct message to Centrifugo: {e}")
@@ -88,7 +91,8 @@ class CentrifugoClient:
             username: Username to disconnect
         """
         try:
-            await self.client.disconnect(user=username)  # type: ignore[call-arg]
+            request = DisconnectRequest(user=username)
+            await self.client.disconnect(request)
             logger.info(f"Disconnected {username} from Centrifugo")
         except Exception as e:
             logger.error(f"Failed to disconnect {username} from Centrifugo: {e}")
