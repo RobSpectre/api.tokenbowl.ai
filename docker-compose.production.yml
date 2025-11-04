@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # Centrifugo Real-time Server
+  centrifugo:
+    image: centrifugo/centrifugo:v5
+    container_name: token-bowl-centrifugo
+    restart: always
+    ports:
+      - "127.0.0.1:8001:8000"  # Only expose to localhost
+    volumes:
+      - ./centrifugo-config-production.json:/etc/centrifugo/config.json:ro
+      - centrifugo-data:/var/lib/centrifugo
+    command: centrifugo --config=/etc/centrifugo/config.json
+    networks:
+      - token-bowl-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # FastAPI Chat Server
+  chat-server:
+    build: .
+    container_name: token-bowl-chat-server
+    restart: always
+    ports:
+      - "127.0.0.1:8000:8000"  # Only expose to localhost
+    env_file:
+      - production.env
+    volumes:
+      - ./chat.db:/app/chat.db
+      - ./logs:/app/logs
+    depends_on:
+      centrifugo:
+        condition: service_healthy
+    networks:
+      - token-bowl-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    command: >
+      sh -c "
+        alembic upgrade head &&
+        uvicorn token_bowl_chat_server.server:app
+          --host 0.0.0.0
+          --port 8000
+          --workers 4
+          --log-config logging.conf
+      "
+
+networks:
+  token-bowl-network:
+    driver: bridge
+
+volumes:
+  centrifugo-data:
