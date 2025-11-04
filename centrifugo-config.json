@@ -6,10 +6,12 @@
   "allowed_origins": ["*"],
   "log_level": "info",
   "health": true,
+  "client_insecure": false,
+  "client_anonymous": false,
   "namespaces": [
     {
       "name": "room",
-      "publish": true,
+      "publish": false,
       "subscribe_to_publish": true,
       "presence": true,
       "join_leave": true,

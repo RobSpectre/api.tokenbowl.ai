@@ -29,8 +29,7 @@ class Settings(BaseSettings):
     # Frontend URL for magic link redirects
     frontend_url: str = "http://localhost:3000"
 
-    # Centrifugo settings
-    enable_centrifugo: bool = False
+    # Centrifugo settings (always enabled)
     centrifugo_api_url: str = "http://localhost:8001/api"
     centrifugo_api_key: str = "your-api-key-change-in-production"
     centrifugo_token_secret: str = "your-secret-key-change-in-production"

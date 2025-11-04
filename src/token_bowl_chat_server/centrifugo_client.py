@@ -39,6 +39,11 @@ class CentrifugoClient:
             "sub": user.username,  # User ID
             "exp": int((datetime.now(UTC) + timedelta(hours=24)).timestamp()),
             "iat": int(datetime.now(UTC).timestamp()),
+            # Grant subscription permissions for channels
+            "channels": [
+                "room:main",  # Allow subscribing to main room
+                f"user:{user.username}",  # Allow subscribing to own user channel
+            ],
         }
         return jwt.encode(claims, self.token_secret, algorithm="HS256")
 

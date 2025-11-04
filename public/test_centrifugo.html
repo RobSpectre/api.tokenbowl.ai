@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Centrifugo Integration Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/centrifuge@4/dist/centrifuge.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 900px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        .step {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f9f9f9;
+            border-left: 4px solid #4CAF50;
+            border-radius: 4px;
+        }
+        .step h3 {
+            margin-top: 0;
+            color: #4CAF50;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        #log {
+            background: #1e1e1e;
+            color: #00ff00;
+            padding: 20px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            height: 400px;
+            overflow-y: auto;
+            margin: 20px 0;
+            white-space: pre-wrap;
+        }
+        .success {
+            color: #4CAF50;
+            font-weight: bold;
+        }
+        .error {
+            color: #f44336;
+            font-weight: bold;
+        }
+        .info {
+            color: #2196F3;
+        }
+        input {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 300px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Centrifugo Integration Test</h1>
+
+        <div class="step">
+            <h3>Step 1: Setup</h3>
+            <button id="registerBtn" onclick="register()">1. Register User</button>
+            <button id="connectBtn" onclick="connectCentrifugo()" disabled>2. Connect to Centrifugo</button>
+        </div>
+
+        <div class="step">
+            <h3>Step 2: Test Messages</h3>
+            <input type="text" id="messageInput" placeholder="Enter test message" disabled />
+            <button id="sendBtn" onclick="sendMessage()" disabled>Send Message</button>
+        </div>
+
+        <div class="step">
+            <h3>📋 Event Log</h3>
+            <div id="log"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8000';
+        let apiKey = null;
+        let username = null;
+        let centrifuge = null;
+
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            const prefix = type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️';
+            logDiv.innerHTML += `[${timestamp}] ${prefix} ${message}\n`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        async function register() {
+            log('Registering new user...', 'info');
+            try {
+                const response = await fetch(`${API_URL}/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: `test_user_${Date.now()}`
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    apiKey = data.api_key;
+                    username = data.username;
+                    log(`Registered user: ${username}`, 'success');
+                    log(`API Key: ${apiKey.substring(0, 20)}...`, 'info');
+
+                    document.getElementById('registerBtn').disabled = true;
+                    document.getElementById('connectBtn').disabled = false;
+                } else {
+                    const error = await response.text();
+                    log(`Registration failed: ${error}`, 'error');
+                }
+            } catch (error) {
+                log(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function connectCentrifugo() {
+            log('Getting Centrifugo connection token...', 'info');
+            try {
+                const response = await fetch(`${API_URL}/centrifugo/connection-token`, {
+                    headers: { 'X-API-Key': apiKey }
+                });
+
+                if (!response.ok) {
+                    const error = await response.text();
+                    log(`Failed to get token: ${error}`, 'error');
+                    return;
+                }
+
+                const data = await response.json();
+                log(`Got connection token`, 'success');
+                log(`Channels: ${data.channels.join(', ')}`, 'info');
+
+                // Connect to Centrifugo
+                log('Connecting to Centrifugo WebSocket...', 'info');
+                centrifuge = new Centrifuge(data.url, {
+                    token: data.token
+                });
+
+                centrifuge.on('connected', function(ctx) {
+                    log(`Connected to Centrifugo!`, 'success');
+                    log(`Client ID: ${ctx.client}`, 'info');
+                });
+
+                centrifuge.on('disconnected', function(ctx) {
+                    log(`Disconnected: ${ctx.reason}`, 'error');
+                });
+
+                // Subscribe to room channel
+                const roomSub = centrifuge.newSubscription('room:main');
+
+                roomSub.on('publication', function(ctx) {
+                    log('📨 Message received from room:main', 'success');
+                    log(`From: ${ctx.data.from_username}`, 'info');
+                    log(`Content: ${ctx.data.content}`, 'info');
+                });
+
+                roomSub.on('subscribed', function(ctx) {
+                    log('Subscribed to room:main', 'success');
+                });
+
+                roomSub.on('subscribing', function(ctx) {
+                    log('Subscribing to room:main...', 'info');
+                });
+
+                roomSub.on('error', function(ctx) {
+                    log(`Subscription error on room:main: ${ctx.error.message}`, 'error');
+                });
+
+                // Subscribe to personal channel
+                const userSub = centrifuge.newSubscription(`user:${username}`);
+
+                userSub.on('publication', function(ctx) {
+                    log(`📨 Direct message received`, 'success');
+                    log(`From: ${ctx.data.from_username}`, 'info');
+                    log(`Content: ${ctx.data.content}`, 'info');
+                });
+
+                userSub.on('subscribed', function(ctx) {
+                    log(`Subscribed to user:${username}`, 'success');
+                });
+
+                userSub.on('subscribing', function(ctx) {
+                    log(`Subscribing to user:${username}...`, 'info');
+                });
+
+                userSub.on('error', function(ctx) {
+                    log(`Subscription error on user:${username}: ${ctx.error.message}`, 'error');
+                });
+
+                roomSub.subscribe();
+                userSub.subscribe();
+                centrifuge.connect();
+
+                document.getElementById('connectBtn').disabled = true;
+                document.getElementById('sendBtn').disabled = false;
+                document.getElementById('messageInput').disabled = false;
+
+            } catch (error) {
+                log(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function sendMessage() {
+            const messageInput = document.getElementById('messageInput');
+            const content = messageInput.value.trim();
+
+            if (!content) {
+                log('Please enter a message', 'error');
+                return;
+            }
+
+            log(`Sending message via REST API: "${content}"`, 'info');
+            try {
+                const response = await fetch(`${API_URL}/messages`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-API-Key': apiKey
+                    },
+                    body: JSON.stringify({ content })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    log(`Message sent via REST API (ID: ${data.id})`, 'success');
+                    log(`Waiting for Centrifugo delivery...`, 'info');
+                    messageInput.value = '';
+                } else {
+                    const error = await response.text();
+                    log(`Failed to send message: ${error}`, 'error');
+                }
+            } catch (error) {
+                log(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        // Initialize
+        log('Ready to test Centrifugo integration', 'success');
+        log('Click "1. Register User" to begin', 'info');
+    </script>
+</body>
+</html>

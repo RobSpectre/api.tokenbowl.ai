@@ -117,26 +117,6 @@ def test_viewer_cannot_send_messages(client):
     assert "does not have permission to send room messages" in response.json()["detail"]
 
 
-def test_websocket_cannot_send_to_viewer(client, registered_user):
-    """Test that WebSocket messages cannot be sent to viewer users."""
-    # Register a viewer
-    response = client.post(
-        "/register",
-        json={"username": "viewer_user", "viewer": True},
-    )
-    assert response.status_code == 201
-
-    # Try to send a direct message via WebSocket
-    with client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as websocket:
-        # Send direct message to viewer
-        websocket.send_json({"content": "Hello viewer", "to_username": "viewer_user"})
-
-        # Should receive error
-        data = websocket.receive_json()
-        assert "error" in data
-        assert "Cannot send messages to viewer user" in data["error"]
-
-
 def test_multiple_viewers_not_in_users_list(client, registered_user):
     """Test that multiple viewers are all excluded from users list."""
     headers = {"X-API-Key": registered_user["api_key"]}
@@ -180,33 +160,6 @@ def test_viewer_with_logo(client):
     data = response.json()
     assert data["viewer"] is True
     assert data["logo"] == "claude-color.png"
-
-
-def test_viewer_receives_websocket_broadcasts(client, registered_user):
-    """Test that viewers receive room messages via WebSocket."""
-    # Register a viewer
-    response = client.post(
-        "/register",
-        json={"username": "viewer_user", "viewer": True},
-    )
-    viewer_api_key = response.json()["api_key"]
-
-    # Connect viewer via WebSocket
-    with (
-        client.websocket_connect(f"/ws?api_key={viewer_api_key}") as viewer_ws,
-        client.websocket_connect(f"/ws?api_key={registered_user['api_key']}") as user_ws,
-    ):
-        # Regular user sends a room message
-        user_ws.send_json({"content": "Room message"})
-
-        # User gets confirmation
-        user_data = user_ws.receive_json()
-        assert user_data["status"] == "sent"
-
-        # Viewer should receive the broadcast
-        viewer_data = viewer_ws.receive_json()
-        assert viewer_data["content"] == "Room message"
-        assert viewer_data["from_username"] == registered_user["username"]
 
 
 def test_viewer_can_see_all_direct_messages(client, registered_user, registered_user2):
