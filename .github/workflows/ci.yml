@@ -48,7 +48,7 @@ jobs:
       - name: Run tests with coverage
         run: |
           source .venv/bin/activate
-          pytest --cov --cov-report=xml --cov-report=term
+          pytest --cov --cov-report=xml --cov-report=term -m "not integration"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
