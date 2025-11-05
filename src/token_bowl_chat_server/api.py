@@ -8,6 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from .auth import generate_api_key, get_current_admin, get_current_user, require_permission
+from .centrifugo_client import get_centrifugo_client
 from .config import settings
 from .models import (
     AVAILABLE_LOGOS,
@@ -621,6 +622,20 @@ async def mark_message_as_read(
     storage.mark_message_as_read(message_id, current_user.username)
     logger.info(f"User {current_user.username} marked message {message_id} as read")
 
+    # Publish read receipt to Centrifugo
+    centrifugo = get_centrifugo_client()
+    # Determine the appropriate channel based on message type
+    if message.message_type == MessageType.DIRECT:
+        # For DMs, send to the sender's user channel
+        channel = f"user:{message.from_username}"
+    else:
+        # For room messages, send to the main room
+        channel = "room:main"
+
+    await centrifugo.publish_read_receipt(
+        message_id=message_id, read_by=current_user.username, channel=channel
+    )
+
 
 @router.post("/messages/mark-all-read", response_model=dict[str, int])
 async def mark_all_messages_as_read(
@@ -636,7 +651,39 @@ async def mark_all_messages_as_read(
     """
     count = storage.mark_all_messages_as_read(current_user.username)
     logger.info(f"User {current_user.username} marked {count} messages as read")
+
+    # Publish updated unread count (should be 0 after marking all as read)
+    centrifugo = get_centrifugo_client()
+    await centrifugo.publish_unread_count(
+        username=current_user.username, unread_room=0, unread_direct=0
+    )
+
     return {"marked_as_read": count}
+
+
+@router.post("/typing")
+async def send_typing_indicator(
+    to_username: str | None = None,
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    """Send a typing indicator to the room or a specific user.
+
+    Args:
+        to_username: Optional recipient for direct message typing
+        current_user: Authenticated user
+
+    Returns:
+        Status message
+    """
+    # Publish typing indicator via Centrifugo
+    centrifugo = get_centrifugo_client()
+    await centrifugo.publish_typing_indicator(
+        username=current_user.username, to_username=to_username
+    )
+
+    target = to_username if to_username else "room"
+    logger.debug(f"{current_user.username} sent typing indicator to {target}")
+    return {"status": "typing indicator sent", "to": target}
 
 
 @router.get("/users", response_model=list[PublicUserProfile])

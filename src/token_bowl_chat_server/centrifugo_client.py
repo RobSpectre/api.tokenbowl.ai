@@ -89,6 +89,84 @@ class CentrifugoClient:
             logger.error(f"Failed to publish direct message to Centrifugo: {e}")
             raise
 
+    async def publish_read_receipt(
+        self, message_id: str, read_by: str, channel: str = "room:main"
+    ) -> None:
+        """Publish a read receipt event to Centrifugo.
+
+        Args:
+            message_id: ID of the message that was read
+            read_by: Username who read the message
+            channel: Channel to publish to (default: room:main)
+        """
+        receipt_data = {
+            "type": "read_receipt",
+            "message_id": message_id,
+            "read_by": read_by,
+            "read_at": datetime.now(UTC).isoformat(),
+        }
+
+        try:
+            request = PublishRequest(channel=channel, data=receipt_data)
+            await self.client.publish(request)
+            logger.info(f"Published read receipt to Centrifugo: {message_id} read by {read_by}")
+        except Exception as e:
+            logger.error(f"Failed to publish read receipt to Centrifugo: {e}")
+
+    async def publish_typing_indicator(self, username: str, to_username: str | None = None) -> None:
+        """Publish a typing indicator event to Centrifugo.
+
+        Args:
+            username: Username who is typing
+            to_username: Optional recipient for direct message typing
+        """
+        typing_data = {
+            "type": "typing",
+            "username": username,
+            "to_username": to_username,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+
+        # Determine which channel to publish to
+        channel = f"user:{to_username}" if to_username else "room:main"
+
+        try:
+            request = PublishRequest(channel=channel, data=typing_data)
+            await self.client.publish(request)
+            logger.debug(
+                f"Published typing indicator: {username} typing to {to_username or 'room'}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to publish typing indicator to Centrifugo: {e}")
+
+    async def publish_unread_count(
+        self, username: str, unread_room: int, unread_direct: int
+    ) -> None:
+        """Publish unread count update to a user's channel.
+
+        Args:
+            username: Username to send update to
+            unread_room: Number of unread room messages
+            unread_direct: Number of unread direct messages
+        """
+        unread_data = {
+            "type": "unread_count",
+            "unread_room_messages": unread_room,
+            "unread_direct_messages": unread_direct,
+            "total_unread": unread_room + unread_direct,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+
+        try:
+            # Send to user's personal channel
+            request = PublishRequest(channel=f"user:{username}", data=unread_data)
+            await self.client.publish(request)
+            logger.debug(
+                f"Published unread count to {username}: {unread_room + unread_direct} total"
+            )
+        except Exception as e:
+            logger.error(f"Failed to publish unread count to Centrifugo: {e}")
+
     async def disconnect_user(self, username: str) -> None:
         """Disconnect a user from Centrifugo.
 
