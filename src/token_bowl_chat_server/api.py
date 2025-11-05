@@ -661,6 +661,49 @@ async def mark_all_messages_as_read(
     return {"marked_as_read": count}
 
 
+@router.get("/messages/{message_id}", response_model=MessageResponse)
+async def get_message(
+    message_id: str,
+    current_user: User = Depends(get_current_user),
+) -> MessageResponse:
+    """Get a specific message by ID.
+
+    Users can only access messages they sent, received, or public room messages.
+
+    Args:
+        message_id: Message ID to retrieve
+        current_user: Authenticated user
+
+    Returns:
+        Message details
+
+    Raises:
+        HTTPException: If message not found or user doesn't have access
+    """
+    message = storage.get_message_by_id(message_id)
+    if not message:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Message {message_id} not found",
+        )
+
+    # Check if user has permission to access this message
+    is_sender = message.from_username == current_user.username
+    is_recipient = message.to_username == current_user.username
+    is_public = message.to_username is None  # Room messages
+
+    if not (is_sender or is_recipient or is_public):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to access this message",
+        )
+
+    # Fetch sender and recipient user info
+    from_user = storage.get_user_by_username(message.from_username)
+    to_user = storage.get_user_by_username(message.to_username) if message.to_username else None
+    return MessageResponse.from_message(message, from_user=from_user, to_user=to_user)
+
+
 @router.post("/typing")
 async def send_typing_indicator(
     to_username: str | None = None,
