@@ -706,6 +706,66 @@ def test_admin_update_user_without_admin(client, registered_user, registered_use
     assert response.status_code == 403
 
 
+def test_admin_regenerate_user_api_key(client, registered_user, registered_admin):
+    """Test admin regenerating a user's API key."""
+    headers = {"X-API-Key": registered_admin["api_key"]}
+    old_api_key = registered_user["api_key"]
+
+    response = client.post(
+        f"/admin/users/{registered_user['id']}/regenerate-api-key",
+        headers=headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "message" in data
+    assert "api_key" in data
+    assert len(data["api_key"]) == 64  # 32 bytes hex = 64 chars
+    new_api_key = data["api_key"]
+
+    # Verify new API key is different from old one
+    assert new_api_key != old_api_key
+
+    # Verify old API key no longer works
+    old_headers = {"X-API-Key": old_api_key}
+    response = client.get("/users/me", headers=old_headers)
+    assert response.status_code == 401
+
+    # Verify new API key works
+    new_headers = {"X-API-Key": new_api_key}
+    response = client.get("/users/me", headers=new_headers)
+    assert response.status_code == 200
+
+
+def test_admin_regenerate_user_api_key_not_found(client, registered_admin):
+    """Test admin regenerating API key for nonexistent user."""
+    headers = {"X-API-Key": registered_admin["api_key"]}
+    response = client.post(
+        "/admin/users/00000000-0000-0000-0000-000000000000/regenerate-api-key",
+        headers=headers,
+    )
+    assert response.status_code == 404
+
+
+def test_admin_regenerate_user_api_key_invalid_uuid(client, registered_admin):
+    """Test admin regenerating API key with invalid UUID."""
+    headers = {"X-API-Key": registered_admin["api_key"]}
+    response = client.post(
+        "/admin/users/invalid-uuid/regenerate-api-key",
+        headers=headers,
+    )
+    assert response.status_code == 400
+
+
+def test_admin_regenerate_user_api_key_without_admin(client, registered_user, registered_user2):
+    """Test non-admin user cannot regenerate other users' API keys."""
+    headers = {"X-API-Key": registered_user["api_key"]}
+    response = client.post(
+        f"/admin/users/{registered_user2['id']}/regenerate-api-key",
+        headers=headers,
+    )
+    assert response.status_code == 403
+
+
 def test_admin_delete_user(client, registered_user, registered_admin):
     """Test admin deleting a user."""
     headers = {"X-API-Key": registered_admin["api_key"]}

@@ -1207,6 +1207,61 @@ async def admin_update_user(
     )
 
 
+@router.post("/admin/users/{user_id}/regenerate-api-key", response_model=dict[str, str])
+async def admin_regenerate_user_api_key(
+    user_id: str,
+    admin_user: User = Depends(get_current_admin),
+) -> dict[str, str]:
+    """Admin: Regenerate API key for any user.
+
+    This generates a new API key and invalidates the old one.
+    The old API key will no longer work for authentication.
+
+    Args:
+        user_id: User UUID to regenerate API key for
+        admin_user: Authenticated admin user
+
+    Returns:
+        Success message with new API key
+
+    Raises:
+        HTTPException: If user not found or invalid UUID
+    """
+    try:
+        user_uuid = UUID(user_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid user ID format: {user_id}",
+        ) from e
+
+    # Check if user exists
+    user = storage.get_user_by_id(user_uuid)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User {user_id} not found",
+        )
+
+    # Generate new API key
+    new_api_key = generate_api_key()
+
+    # Update API key in storage
+    success = storage.update_user_api_key(user_uuid, new_api_key)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update user API key",
+        )
+
+    logger.info(f"Admin {admin_user.username} regenerated API key for user {user.username}")
+
+    return {
+        "message": f"API key regenerated successfully for user {user.username}",
+        "api_key": new_api_key,
+    }
+
+
 @router.delete("/admin/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def admin_delete_user(
     user_id: str,

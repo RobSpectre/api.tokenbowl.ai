@@ -673,6 +673,139 @@
         }
       }
     },
+    "/messages/{message_id}": {
+      "get": {
+        "summary": "Get Message",
+        "description": "Get a specific message by ID.\n\nUsers can only access messages they sent, received, or public room messages.\n\nArgs:\n    message_id: Message ID to retrieve\n    current_user: Authenticated user\n\nReturns:\n    Message details\n\nRaises:\n    HTTPException: If message not found or user doesn't have access",
+        "operationId": "get_message_messages__message_id__get",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Message Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/typing": {
+      "post": {
+        "summary": "Send Typing Indicator",
+        "description": "Send a typing indicator to the room or a specific user.\n\nArgs:\n    to_username: Optional recipient for direct message typing\n    current_user: Authenticated user\n\nReturns:\n    Status message",
+        "operationId": "send_typing_indicator_typing_post",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "to_username",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To Username"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Send Typing Indicator Typing Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/users": {
       "get": {
         "summary": "Get Users",
@@ -732,7 +865,7 @@
     "/users/online": {
       "get": {
         "summary": "Get Online Users",
-        "description": "Get list of users currently connected via WebSocket with their display info.\n\nArgs:\n    current_user: Authenticated user\n\nReturns:\n    List of online user profiles with logos, emojis, and bot status",
+        "description": "Get list of users currently connected via Centrifugo.\n\nTODO: Implement using Centrifugo presence API\nCurrently returns empty list after WebSocket removal.\n\nArgs:\n    current_user: Authenticated user\n\nReturns:\n    List of online user profiles",
         "operationId": "get_online_users_users_online_get",
         "security": [
           {
@@ -1395,6 +1528,71 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/users/{user_id}/regenerate-api-key": {
+      "post": {
+        "summary": "Admin Regenerate User Api Key",
+        "description": "Admin: Regenerate API key for any user.\n\nThis generates a new API key and invalidates the old one.\nThe old API key will no longer work for authentication.\n\nArgs:\n    user_id: User UUID to regenerate API key for\n    admin_user: Authenticated admin user\n\nReturns:\n    Success message with new API key\n\nRaises:\n    HTTPException: If user not found or invalid UUID",
+        "operationId": "admin_regenerate_user_api_key_admin_users__user_id__regenerate_api_key_post",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Admin Regenerate User Api Key Admin Users  User Id  Regenerate Api Key Post"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -2401,6 +2599,60 @@
         }
       }
     },
+    "/centrifugo/connection-token": {
+      "get": {
+        "summary": "Get Centrifugo Connection Token",
+        "description": "Get connection token for Centrifugo WebSocket.\n\nReturns JWT token and connection information for connecting to Centrifugo.\n\nArgs:\n    current_user: Authenticated user\n\nReturns:\n    Connection info with token and channels",
+        "operationId": "get_centrifugo_connection_token_centrifugo_connection_token_get",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Centrifugo Connection Token Centrifugo Connection Token Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "summary": "Health Check",
@@ -2427,7 +2679,7 @@
     "/admin/websocket/connections": {
       "get": {
         "summary": "Get Websocket Connections",
-        "description": "Get WebSocket connection statistics for all connected users.\n\nReturns:\n    Dictionary with connection statistics\n\nRaises:\n    HTTPException: If user is not an admin",
+        "description": "Get Centrifugo connection statistics.\n\nTODO: Implement using Centrifugo stats API\nCurrently returns empty stats after WebSocket removal.\n\nReturns:\n    Dictionary with connection statistics\n\nRaises:\n    HTTPException: If user is not an admin",
         "operationId": "get_websocket_connections_admin_websocket_connections_get",
         "security": [
           {
